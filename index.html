@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Book Club - Home</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <h1 class="nav-logo">📚 Book Club</h1>
+            <div class="nav-menu">
+                <div class="dropdown">
+                    <button class="dropbtn">Menu ▼</button>
+                    <div class="dropdown-content">
+                        <a href="index.html">Home</a>
+                        <a href="members.html">Member List</a>
+                        <a href="calendar.html">Calendar</a>
+                        <a href="books-read.html">Books Read</a>
+                        <a href="nominations.html">Book Nominations</a>
+                        <a href="voting.html">Voting</a>
+                    </div>
+                </div>
+                <div id="userInfo" class="user-info"></div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="hero">
+            <h1>Welcome to Our Book Club!</h1>
+            <p id="welcomeMessage">Join us in our journey through great literature</p>
+        </div>
+
+        <!-- Current Book Section -->
+        <div class="section" id="currentBookSection">
+            <h2>📖 Current Book</h2>
+            <div id="currentBookCard" class="book-card-large">
+                <p class="loading">Loading current book...</p>
+            </div>
+        </div>
+
+        <!-- Next Meeting Section -->
+        <div class="section">
+            <h2>📅 Next Meeting</h2>
+            <div id="nextMeetingCard" class="meeting-card">
+                <p id="nextMeetingDate">Loading...</p>
+                <div id="countdownTimer" class="countdown"></div>
+            </div>
+        </div>
+
+        <!-- Author Quote Section -->
+        <div class="section quote-section">
+            <h2>✨ Quote of the Day</h2>
+            <div id="authorQuote" class="quote-card">
+                <p class="quote-text"></p>
+                <p class="quote-author"></p>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p>&copy; 2026 Book Club. Powered by books and friendship.</p>
+    </footer>
+
+    <script src="app.js"></script>
+    <script>
+        // Page-specific initialization
+        document.addEventListener('DOMContentLoaded', async () => {
+            await initAuth();
+            loadCurrentBook();
+            loadNextMeeting();
+            displayRandomQuote();
+        });
+
+        async function loadCurrentBook() {
+            try {
+                const response = await apiCall('/getCurrentBook');
+                const bookCard = document.getElementById('currentBookCard');
+                
+                if (response.success && response.book) {
+                    const book = response.book;
+                    bookCard.innerHTML = `
+                        <div class="book-image">
+                            ${book.imageUrl ? `<img src="${book.imageUrl}" alt="${book.title}">` : '<div class="no-image">📚</div>'}
+                        </div>
+                        <div class="book-details">
+                            <h3>${book.title}</h3>
+                            <p class="author">by ${book.author}</p>
+                            <p class="nominated-by">Nominated by: ${book.nominatedBy}</p>
+                            <div class="book-links">
+                                ${book.amazonLink ? `<a href="${book.amazonLink}" target="_blank" class="btn btn-secondary">Amazon</a>` : ''}
+                                ${book.goodreadsLink ? `<a href="${book.goodreadsLink}" target="_blank" class="btn btn-secondary">Goodreads</a>` : ''}
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    bookCard.innerHTML = '<p class="no-data">No book selected yet. Start nominating books!</p>';
+                }
+            } catch (error) {
+                console.error('Error loading current book:', error);
+                document.getElementById('currentBookCard').innerHTML = '<p class="error">Failed to load current book</p>';
+            }
+        }
+
+        async function loadNextMeeting() {
+            try {
+                const response = await apiCall('/getNextMeeting');
+                const dateElement = document.getElementById('nextMeetingDate');
+                const countdownElement = document.getElementById('countdownTimer');
+                
+                if (response.success && response.date) {
+                    const meetingDate = new Date(response.date);
+                    dateElement.innerHTML = `<strong>${meetingDate.toLocaleDateString('en-US', { 
+                        weekday: 'long', 
+                        year: 'numeric', 
+                        month: 'long', 
+                        day: 'numeric' 
+                    })}</strong>`;
+                    
+                    // Calculate days until meeting
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    meetingDate.setHours(0, 0, 0, 0);
+                    const daysUntil = Math.ceil((meetingDate - today) / (1000 * 60 * 60 * 24));
+                    
+                    if (daysUntil > 0) {
+                        countdownElement.innerHTML = `<div class="countdown-number">${daysUntil}</div><div class="countdown-label">days until our next meeting</div>`;
+                    } else if (daysUntil === 0) {
+                        countdownElement.innerHTML = `<div class="countdown-number">Today!</div><div class="countdown-label">See you soon!</div>`;
+                    } else {
+                        countdownElement.innerHTML = `<div class="countdown-label">Meeting date passed</div>`;
+                    }
+                } else {
+                    dateElement.textContent = 'No meeting scheduled yet';
+                    countdownElement.innerHTML = '';
+                }
+            } catch (error) {
+                console.error('Error loading next meeting:', error);
+                document.getElementById('nextMeetingDate').textContent = 'Failed to load meeting date';
+            }
+        }
+
+        function displayRandomQuote() {
+            const quotes = [
+                { text: "A reader lives a thousand lives before he dies. The man who never reads lives only one.", author: "George R.R. Martin" },
+                { text: "Until I feared I would lose it, I never loved to read. One does not love breathing.", author: "Harper Lee" },
+                { text: "There is no friend as loyal as a book.", author: "Ernest Hemingway" },
+                { text: "Books are a uniquely portable magic.", author: "Stephen King" },
+                { text: "Reading is essential for those who seek to rise above the ordinary.", author: "Jim Rohn" },
+                { text: "The reading of all good books is like a conversation with the finest minds of past centuries.", author: "René Descartes" },
+                { text: "I have always imagined that Paradise will be a kind of library.", author: "Jorge Luis Borges" },
+                { text: "Think before you speak. Read before you think.", author: "Fran Lebowitz" },
+                { text: "A book is a dream that you hold in your hand.", author: "Neil Gaiman" },
+                { text: "Once you learn to read, you will be forever free.", author: "Frederick Douglass" },
+                { text: "Literature is the most agreeable way of ignoring life.", author: "Fernando Pessoa" },
+                { text: "Reading is to the mind what exercise is to the body.", author: "Joseph Addison" },
+                { text: "We read to know we're not alone.", author: "William Nicholson" },
+                { text: "The only important thing in a book is the meaning that it has for you.", author: "W. Somerset Maugham" },
+                { text: "I lived in books more than I lived anywhere else.", author: "Neil Gaiman" }
+            ];
+            
+            const randomQuote = quotes[Math.floor(Math.random() * quotes.length)];
+            const quoteCard = document.getElementById('authorQuote');
+            quoteCard.querySelector('.quote-text').textContent = `"${randomQuote.text}"`;
+            quoteCard.querySelector('.quote-author').textContent = `— ${randomQuote.author}`;
+        }
+    </script>
+</body>
+</html>

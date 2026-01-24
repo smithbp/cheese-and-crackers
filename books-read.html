@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Book Club - Books Read</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <h1 class="nav-logo">📚 Book Club</h1>
+            <div class="nav-menu">
+                <div class="dropdown">
+                    <button class="dropbtn">Menu ▼</button>
+                    <div class="dropdown-content">
+                        <a href="index.html">Home</a>
+                        <a href="members.html">Member List</a>
+                        <a href="calendar.html">Calendar</a>
+                        <a href="books-read.html">Books Read</a>
+                        <a href="nominations.html">Book Nominations</a>
+                        <a href="voting.html">Voting</a>
+                    </div>
+                </div>
+                <div id="userInfo" class="user-info"></div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="page-header">
+            <h1>📖 Books We've Read</h1>
+        </div>
+
+        <div id="booksGrid" class="books-grid">
+            <p class="loading">Loading books...</p>
+        </div>
+    </div>
+
+    <!-- Book Details Modal -->
+    <div id="bookDetailsModal" class="modal">
+        <div class="modal-content modal-large">
+            <span class="close" onclick="closeBookDetailsModal()">&times;</span>
+            <div id="bookDetailsContent"></div>
+        </div>
+    </div>
+
+    <!-- Add Rating Modal -->
+    <div id="addRatingModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeAddRatingModal()">&times;</span>
+            <h2>Rate This Book</h2>
+            <form id="addRatingForm" onsubmit="submitRating(event)">
+                <div class="form-group">
+                    <label for="rating">Rating (1-10) *</label>
+                    <input type="number" id="rating" min="1" max="10" required>
+                    <div class="rating-scale">
+                        <span>1 = Terrible</span>
+                        <span>10 = Masterpiece</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="review">Review (Optional)</label>
+                    <textarea id="review" rows="4" placeholder="Share your thoughts about the book..."></textarea>
+                </div>
+                <div id="ratingMessage" class="message"></div>
+                <div class="form-actions">
+                    <button type="button" onclick="closeAddRatingModal()" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Submit Rating</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <footer>
+        <p>&copy; 2026 Book Club. Powered by books and friendship.</p>
+    </footer>
+
+    <script src="app.js"></script>
+    <script>
+        let currentBookForRating = null;
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            await initAuth();
+            loadBooksRead();
+        });
+
+        async function loadBooksRead() {
+            try {
+                const response = await apiCall('/getBooksRead');
+                const grid = document.getElementById('booksGrid');
+                
+                if (response.success && response.books.length > 0) {
+                    grid.innerHTML = response.books.map(book => `
+                        <div class="book-card" onclick="showBookDetails('${book.id}')">
+                            <div class="book-card-image">
+                                ${book.imageUrl ? `<img src="${book.imageUrl}" alt="${book.title}">` : '<div class="no-image">📚</div>'}
+                            </div>
+                            <div class="book-card-content">
+                                <h3>${book.title}</h3>
+                                <p class="author">by ${book.author}</p>
+                                <p class="date-read">Read: ${new Date(book.dateCompleted).toLocaleDateString()}</p>
+                                <div class="book-rating">
+                                    <span class="rating-score">⭐ ${book.avgRating ? book.avgRating.toFixed(1) : 'Not rated'}/10</span>
+                                    <span class="rating-count">${book.ratingCount || 0} ratings</span>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    grid.innerHTML = '<p class="no-data">No books read yet. Start reading!</p>';
+                }
+            } catch (error) {
+                console.error('Error loading books:', error);
+                document.getElementById('booksGrid').innerHTML = '<p class="error">Failed to load books</p>';
+            }
+        }
+
+        async function showBookDetails(bookId) {
+            try {
+                const response = await apiCall('/getBookDetails', { bookId: bookId });
+                const content = document.getElementById('bookDetailsContent');
+                
+                if (response.success && response.book) {
+                    const book = response.book;
+                    const currentUser = JSON.parse(localStorage.getItem('bookClubUser'));
+                    const userRating = response.ratings.find(r => r.userId === currentUser.id);
+                    
+                    content.innerHTML = `
+                        <div class="book-details-header">
+                            <div class="book-details-image">
+                                ${book.imageUrl ? `<img src="${book.imageUrl}" alt="${book.title}">` : '<div class="no-image-large">📚</div>'}
+                            </div>
+                            <div class="book-details-info">
+                                <h2>${book.title}</h2>
+                                <h3>by ${book.author}</h3>
+                                <p><strong>Nominated by:</strong> ${book.nominatedBy}</p>
+                                <p><strong>Read on:</strong> ${new Date(book.dateCompleted).toLocaleDateString()}</p>
+                                <div class="book-rating-large">
+                                    <span class="rating-score-large">⭐ ${book.avgRating ? book.avgRating.toFixed(1) : 'Not rated'}/10</span>
+                                    <span class="rating-count">(${book.ratingCount || 0} ratings)</span>
+                                </div>
+                                <div class="book-links">
+                                    ${book.amazonLink ? `<a href="${book.amazonLink}" target="_blank" class="btn btn-secondary">Amazon</a>` : ''}
+                                    ${book.goodreadsLink ? `<a href="${book.goodreadsLink}" target="_blank" class="btn btn-secondary">Goodreads</a>` : ''}
+                                    ${userRating ? 
+                                        `<button onclick="showAddRatingModal('${book.id}')" class="btn btn-primary">Update Your Rating</button>` :
+                                        `<button onclick="showAddRatingModal('${book.id}')" class="btn btn-primary">Rate This Book</button>`
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                        
+                        ${userRating ? `
+                            <div class="user-rating-box">
+                                <h4>Your Rating: ${userRating.rating}/10</h4>
+                                ${userRating.review ? `<p>${userRating.review}</p>` : ''}
+                            </div>
+                        ` : ''}
+                        
+                        <div class="ratings-section">
+                            <h3>Member Ratings & Reviews</h3>
+                            ${response.ratings.length > 0 ? 
+                                response.ratings.map(rating => `
+                                    <div class="rating-item">
+                                        <div class="rating-header">
+                                            <strong>${rating.memberName}</strong>
+                                            <span class="rating-score">⭐ ${rating.rating}/10</span>
+                                        </div>
+                                        ${rating.review ? `<p class="rating-review">${rating.review}</p>` : ''}
+                                        <p class="rating-date">${new Date(rating.dateRated).toLocaleDateString()}</p>
+                                    </div>
+                                `).join('') :
+                                '<p class="no-data">No ratings yet. Be the first to rate!</p>'
+                            }
+                        </div>
+                    `;
+                    
+                    document.getElementById('bookDetailsModal').style.display = 'block';
+                }
+            } catch (error) {
+                console.error('Error loading book details:', error);
+                alert('Failed to load book details');
+            }
+        }
+
+        function closeBookDetailsModal() {
+            document.getElementById('bookDetailsModal').style.display = 'none';
+        }
+
+        function showAddRatingModal(bookId) {
+            currentBookForRating = bookId;
+            document.getElementById('addRatingModal').style.display = 'block';
+            closeBookDetailsModal();
+        }
+
+        function closeAddRatingModal() {
+            document.getElementById('addRatingModal').style.display = 'none';
+            document.getElementById('addRatingForm').reset();
+            document.getElementById('ratingMessage').textContent = '';
+            currentBookForRating = null;
+        }
+
+        async function submitRating(event) {
+            event.preventDefault();
+            
+            const rating = document.getElementById('rating').value;
+            const review = document.getElementById('review').value;
+            const messageDiv = document.getElementById('ratingMessage');
+            
+            try {
+                const response = await apiCall('/addRating', {
+                    bookId: currentBookForRating,
+                    rating: parseInt(rating),
+                    review: review
+                });
+                
+                if (response.success) {
+                    messageDiv.className = 'message success';
+                    messageDiv.textContent = 'Rating submitted successfully!';
+                    
+                    setTimeout(() => {
+                        closeAddRatingModal();
+                        loadBooksRead();
+                    }, 1500);
+                } else {
+                    messageDiv.className = 'message error';
+                    messageDiv.textContent = response.message || 'Failed to submit rating';
+                }
+            } catch (error) {
+                messageDiv.className = 'message error';
+                messageDiv.textContent = 'Error submitting rating. Please try again.';
+                console.error('Submit rating error:', error);
+            }
+        }
+
+        // Close modals when clicking outside
+        window.onclick = function(event) {
+            if (event.target.classList.contains('modal')) {
+                event.target.style.display = 'none';
+            }
+        }
+    </script>
+</body>
+</html>

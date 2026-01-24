@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Book Club - Login</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-box">
+            <h1>📚 Book Club Login</h1>
+            <p class="login-subtitle">Welcome back! Please sign in to continue.</p>
+            
+            <!-- Google Sign-In -->
+            <div class="login-section">
+                <h3>Sign in with Google</h3>
+                <div id="g_id_onload"
+                     data-client_id="YOUR_GOOGLE_CLIENT_ID"
+                     data-callback="handleGoogleSignIn">
+                </div>
+                <div class="g_id_signin" 
+                     data-type="standard"
+                     data-size="large"
+                     data-theme="outline"
+                     data-text="sign_in_with"
+                     data-shape="rectangular"
+                     data-logo_alignment="left">
+                </div>
+            </div>
+
+            <div class="divider">
+                <span>OR</span>
+            </div>
+
+            <!-- Username/Password Login -->
+            <div class="login-section">
+                <h3>Sign in with Username</h3>
+                <form id="loginForm" onsubmit="handleLogin(event)">
+                    <div class="form-group">
+                        <label for="username">Username</label>
+                        <input type="text" id="username" name="username" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Password</label>
+                        <input type="password" id="password" name="password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-full">Sign In</button>
+                </form>
+            </div>
+
+            <div id="loginMessage" class="message"></div>
+
+            <div class="login-footer">
+                <p>Don't have an account? Contact an administrator to get started.</p>
+                <a href="index.html" class="link">← Back to Home</a>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+    <script>
+        // Check if already logged in
+        document.addEventListener('DOMContentLoaded', () => {
+            const currentUser = JSON.parse(localStorage.getItem('bookClubUser'));
+            if (currentUser && currentUser.token) {
+                // Redirect to home page
+                window.location.href = 'index.html';
+            }
+        });
+
+        async function handleLogin(event) {
+            event.preventDefault();
+            
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const messageDiv = document.getElementById('loginMessage');
+            
+            try {
+                const response = await apiCall('/login', {
+                    username: username,
+                    password: password
+                });
+                
+                if (response.success) {
+                    // Store user info
+                    localStorage.setItem('bookClubUser', JSON.stringify(response.user));
+                    messageDiv.className = 'message success';
+                    messageDiv.textContent = 'Login successful! Redirecting...';
+                    
+                    setTimeout(() => {
+                        window.location.href = 'index.html';
+                    }, 1000);
+                } else {
+                    messageDiv.className = 'message error';
+                    messageDiv.textContent = response.message || 'Invalid username or password';
+                }
+            } catch (error) {
+                messageDiv.className = 'message error';
+                messageDiv.textContent = 'Login failed. Please try again.';
+                console.error('Login error:', error);
+            }
+        }
+
+        async function handleGoogleSignIn(response) {
+            const messageDiv = document.getElementById('loginMessage');
+            
+            try {
+                const result = await apiCall('/googleLogin', {
+                    credential: response.credential
+                });
+                
+                if (result.success) {
+                    localStorage.setItem('bookClubUser', JSON.stringify(result.user));
+                    messageDiv.className = 'message success';
+                    messageDiv.textContent = 'Login successful! Redirecting...';
+                    
+                    setTimeout(() => {
+                        window.location.href = 'index.html';
+                    }, 1000);
+                } else {
+                    messageDiv.className = 'message error';
+                    messageDiv.textContent = result.message || 'Google login failed. You may need to be added as a member first.';
+                }
+            } catch (error) {
+                messageDiv.className = 'message error';
+                messageDiv.textContent = 'Google login failed. Please try again.';
+                console.error('Google login error:', error);
+            }
+        }
+    </script>
+</body>
+</html>

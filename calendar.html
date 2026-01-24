@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Book Club - Calendar</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <h1 class="nav-logo">📚 Book Club</h1>
+            <div class="nav-menu">
+                <div class="dropdown">
+                    <button class="dropbtn">Menu ▼</button>
+                    <div class="dropdown-content">
+                        <a href="index.html">Home</a>
+                        <a href="members.html">Member List</a>
+                        <a href="calendar.html">Calendar</a>
+                        <a href="books-read.html">Books Read</a>
+                        <a href="nominations.html">Book Nominations</a>
+                        <a href="voting.html">Voting</a>
+                    </div>
+                </div>
+                <div id="userInfo" class="user-info"></div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="page-header">
+            <h1>📅 Book Club Calendar</h1>
+        </div>
+
+        <div class="calendar-info">
+            <p>View all upcoming book club meetings and events. Click on any event to add it to your personal Google Calendar!</p>
+        </div>
+
+        <div class="calendar-container" id="calendarContainer">
+            <p class="loading">Loading calendar...</p>
+        </div>
+
+        <div id="adminCalendarSettings" style="display: none;" class="section">
+            <h3>Calendar Settings (Admin Only)</h3>
+            <form id="calendarSettingsForm" onsubmit="saveCalendarSettings(event)">
+                <div class="form-group">
+                    <label for="calendarUrl">Google Calendar Embed URL</label>
+                    <input type="text" id="calendarUrl" placeholder="Paste your Google Calendar embed code or URL here">
+                    <small>To get this, go to your Google Calendar → Settings → Settings for my calendars → [Your Calendar] → Integrate calendar → Copy the "Embed code" or just the src URL</small>
+                </div>
+                <div class="form-group">
+                    <label for="nextMeetingDate">Next Meeting Date</label>
+                    <input type="datetime-local" id="nextMeetingDate">
+                </div>
+                <div id="calendarMessage" class="message"></div>
+                <button type="submit" class="btn btn-primary">Save Settings</button>
+            </form>
+        </div>
+    </div>
+
+    <footer>
+        <p>&copy; 2026 Book Club. Powered by books and friendship.</p>
+    </footer>
+
+    <script src="app.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            await initAuth();
+            checkAdminStatus();
+            loadCalendar();
+        });
+
+        function checkAdminStatus() {
+            const user = JSON.parse(localStorage.getItem('bookClubUser'));
+            if (user && user.isAdmin) {
+                document.getElementById('adminCalendarSettings').style.display = 'block';
+                loadCalendarSettings();
+            }
+        }
+
+        async function loadCalendar() {
+            try {
+                const response = await apiCall('/getCalendarUrl');
+                const container = document.getElementById('calendarContainer');
+                
+                if (response.success && response.calendarUrl) {
+                    // Check if it's a full embed code or just a URL
+                    if (response.calendarUrl.includes('<iframe')) {
+                        container.innerHTML = response.calendarUrl;
+                    } else {
+                        container.innerHTML = `
+                            <iframe src="${response.calendarUrl}" 
+                                    style="border: 0" 
+                                    width="100%" 
+                                    height="600" 
+                                    frameborder="0" 
+                                    scrolling="no">
+                            </iframe>
+                        `;
+                    }
+                } else {
+                    container.innerHTML = `
+                        <div class="no-data">
+                            <h3>Calendar not set up yet</h3>
+                            <p>An administrator needs to configure the calendar settings.</p>
+                            ${response.isAdmin ? '<p>Scroll down to configure the calendar.</p>' : ''}
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('Error loading calendar:', error);
+                document.getElementById('calendarContainer').innerHTML = '<p class="error">Failed to load calendar</p>';
+            }
+        }
+
+        async function loadCalendarSettings() {
+            try {
+                const response = await apiCall('/getCalendarSettings');
+                
+                if (response.success) {
+                    if (response.calendarUrl) {
+                        // Extract URL from iframe if full embed code
+                        let url = response.calendarUrl;
+                        if (url.includes('src="')) {
+                            const match = url.match(/src="([^"]+)"/);
+                            if (match) url = match[1];
+                        }
+                        document.getElementById('calendarUrl').value = url;
+                    }
+                    if (response.nextMeetingDate) {
+                        // Convert to datetime-local format
+                        const date = new Date(response.nextMeetingDate);
+                        const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+                        document.getElementById('nextMeetingDate').value = localDate;
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading calendar settings:', error);
+            }
+        }
+
+        async function saveCalendarSettings(event) {
+            event.preventDefault();
+            
+            const calendarUrl = document.getElementById('calendarUrl').value;
+            const nextMeetingDate = document.getElementById('nextMeetingDate').value;
+            const messageDiv = document.getElementById('calendarMessage');
+            
+            try {
+                const response = await apiCall('/saveCalendarSettings', {
+                    calendarUrl: calendarUrl,
+                    nextMeetingDate: nextMeetingDate ? new Date(nextMeetingDate).toISOString() : null
+                });
+                
+                if (response.success) {
+                    messageDiv.className = 'message success';
+                    messageDiv.textContent = 'Calendar settings saved successfully!';
+                    
+                    setTimeout(() => {
+                        messageDiv.textContent = '';
+                        loadCalendar();
+                    }, 2000);
+                } else {
+                    messageDiv.className = 'message error';
+                    messageDiv.textContent = response.message || 'Failed to save settings';
+                }
+            } catch (error) {
+                messageDiv.className = 'message error';
+                messageDiv.textContent = 'Error saving settings. Please try again.';
+                console.error('Save calendar settings error:', error);
+            }
+        }
+    </script>
+</body>
+</html>

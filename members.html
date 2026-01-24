@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Book Club - Members</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <h1 class="nav-logo">📚 Book Club</h1>
+            <div class="nav-menu">
+                <div class="dropdown">
+                    <button class="dropbtn">Menu ▼</button>
+                    <div class="dropdown-content">
+                        <a href="index.html">Home</a>
+                        <a href="members.html">Member List</a>
+                        <a href="calendar.html">Calendar</a>
+                        <a href="books-read.html">Books Read</a>
+                        <a href="nominations.html">Book Nominations</a>
+                        <a href="voting.html">Voting</a>
+                    </div>
+                </div>
+                <div id="userInfo" class="user-info"></div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="page-header">
+            <h1>👥 Book Club Members</h1>
+            <div id="adminActions" class="admin-actions" style="display: none;">
+                <button onclick="showAddMemberModal()" class="btn btn-primary">➕ Add Member</button>
+            </div>
+        </div>
+
+        <div id="membersGrid" class="members-grid">
+            <p class="loading">Loading members...</p>
+        </div>
+    </div>
+
+    <!-- Add Member Modal -->
+    <div id="addMemberModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeAddMemberModal()">&times;</span>
+            <h2>Add New Member</h2>
+            <form id="addMemberForm" onsubmit="handleAddMember(event)">
+                <div class="form-group">
+                    <label for="memberName">Name *</label>
+                    <input type="text" id="memberName" required>
+                </div>
+                <div class="form-group">
+                    <label for="memberEmail">Email *</label>
+                    <input type="email" id="memberEmail" required>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="makeAdmin">
+                        Make this user an admin
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="googleOnly">
+                        Google Sign-In only (no username/password)
+                    </label>
+                </div>
+                <div id="addMemberMessage" class="message"></div>
+                <div class="form-actions">
+                    <button type="button" onclick="closeAddMemberModal()" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add Member</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Remove Member Modal -->
+    <div id="removeMemberModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeRemoveMemberModal()">&times;</span>
+            <h2>Remove Member</h2>
+            <p id="removeMemberText"></p>
+            <div id="removeMemberMessage" class="message"></div>
+            <div class="form-actions">
+                <button onclick="closeRemoveMemberModal()" class="btn btn-secondary">Cancel</button>
+                <button onclick="confirmRemoveMember()" class="btn btn-danger">Remove Member</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reset Credentials Modal -->
+    <div id="resetCredentialsModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeResetCredentialsModal()">&times;</span>
+            <h2>Reset Login Credentials</h2>
+            <p id="resetCredentialsText"></p>
+            <div id="resetCredentialsMessage" class="message"></div>
+            <div class="form-actions">
+                <button onclick="closeResetCredentialsModal()" class="btn btn-secondary">Cancel</button>
+                <button onclick="confirmResetCredentials()" class="btn btn-primary">Reset & Send Email</button>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p>&copy; 2026 Book Club. Powered by books and friendship.</p>
+    </footer>
+
+    <script src="app.js"></script>
+    <script>
+        let currentMemberToRemove = null;
+        let currentMemberToReset = null;
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            await initAuth();
+            checkAdminStatus();
+            loadMembers();
+        });
+
+        function checkAdminStatus() {
+            const user = JSON.parse(localStorage.getItem('bookClubUser'));
+            if (user && user.isAdmin) {
+                document.getElementById('adminActions').style.display = 'block';
+            }
+        }
+
+        async function loadMembers() {
+            try {
+                const response = await apiCall('/getMembers');
+                const grid = document.getElementById('membersGrid');
+                
+                if (response.success && response.members.length > 0) {
+                    const currentUser = JSON.parse(localStorage.getItem('bookClubUser'));
+                    const isAdmin = currentUser && currentUser.isAdmin;
+                    
+                    grid.innerHTML = response.members.map(member => `
+                        <div class="member-card">
+                            <div class="member-avatar">${member.name.charAt(0).toUpperCase()}</div>
+                            <div class="member-info">
+                                <h3>${member.name}</h3>
+                                <p class="member-email">${member.email}</p>
+                                ${member.isAdmin ? '<span class="admin-badge">Admin</span>' : ''}
+                            </div>
+                            ${isAdmin ? `
+                                <div class="member-actions">
+                                    <button onclick="showResetCredentialsModal('${member.id}', '${member.name}')" class="btn btn-small">Reset Password</button>
+                                    ${member.id !== currentUser.id ? `<button onclick="showRemoveMemberModal('${member.id}', '${member.name}')" class="btn btn-small btn-danger">Remove</button>` : ''}
+                                </div>
+                            ` : ''}
+                        </div>
+                    `).join('');
+                } else {
+                    grid.innerHTML = '<p class="no-data">No members found</p>';
+                }
+            } catch (error) {
+                console.error('Error loading members:', error);
+                document.getElementById('membersGrid').innerHTML = '<p class="error">Failed to load members</p>';
+            }
+        }
+
+        function showAddMemberModal() {
+            document.getElementById('addMemberModal').style.display = 'block';
+        }
+
+        function closeAddMemberModal() {
+            document.getElementById('addMemberModal').style.display = 'none';
+            document.getElementById('addMemberForm').reset();
+            document.getElementById('addMemberMessage').textContent = '';
+        }
+
+        async function handleAddMember(event) {
+            event.preventDefault();
+            
+            const name = document.getElementById('memberName').value;
+            const email = document.getElementById('memberEmail').value;
+            const isAdmin = document.getElementById('makeAdmin').checked;
+            const googleOnly = document.getElementById('googleOnly').checked;
+            const messageDiv = document.getElementById('addMemberMessage');
+            
+            try {
+                const response = await apiCall('/addMember', {
+                    name: name,
+                    email: email,
+                    isAdmin: isAdmin,
+                    googleOnly: googleOnly
+                });
+                
+                if (response.success) {
+                    messageDiv.className = 'message success';
+                    messageDiv.textContent = 'Member added successfully! ' + (googleOnly ? 'They can now log in with Google.' : 'Login credentials sent to their email.');
+                    
+                    setTimeout(() => {
+                        closeAddMemberModal();
+                        loadMembers();
+                    }, 2000);
+                } else {
+                    messageDiv.className = 'message error';
+                    messageDiv.textContent = response.message || 'Failed to add member';
+                }
+            } catch (error) {
+                messageDiv.className = 'message error';
+                messageDiv.textContent = 'Error adding member. Please try again.';
+                console.error('Add member error:', error);
+            }
+        }
+
+        function showRemoveMemberModal(memberId, memberName) {
+            currentMemberToRemove = memberId;
+            document.getElementById('removeMemberText').textContent = `Are you sure you want to remove ${memberName} from the book club?`;
+            document.getElementById('removeMemberModal').style.display = 'block';
+        }
+
+        function closeRemoveMemberModal() {
+            document.getElementById('removeMemberModal').style.display = 'none';
+            currentMemberToRemove = null;
+            document.getElementById('removeMemberMessage').textContent = '';
+        }
+
+        async function confirmRemoveMember() {
+            const messageDiv = document.getElementById('removeMemberMessage');
+            
+            try {
+                const response = await apiCall('/removeMember', {
+                    memberId: currentMemberToRemove
+                });
+                
+                if (response.success) {
+                    messageDiv.className = 'message success';
+                    messageDiv.textContent = 'Member removed successfully!';
+                    
+                    setTimeout(() => {
+                        closeRemoveMemberModal();
+                        loadMembers();
+                    }, 1500);
+                } else {
+                    messageDiv.className = 'message error';
+                    messageDiv.textContent = response.message || 'Failed to remove member';
+                }
+            } catch (error) {
+                messageDiv.className = 'message error';
+                messageDiv.textContent = 'Error removing member. Please try again.';
+                console.error('Remove member error:', error);
+            }
+        }
+
+        function showResetCredentialsModal(memberId, memberName) {
+            currentMemberToReset = memberId;
+            document.getElementById('resetCredentialsText').textContent = `Reset login credentials for ${memberName}? New credentials will be generated and emailed to them.`;
+            document.getElementById('resetCredentialsModal').style.display = 'block';
+        }
+
+        function closeResetCredentialsModal() {
+            document.getElementById('resetCredentialsModal').style.display = 'none';
+            currentMemberToReset = null;
+            document.getElementById('resetCredentialsMessage').textContent = '';
+        }
+
+        async function confirmResetCredentials() {
+            const messageDiv = document.getElementById('resetCredentialsMessage');
+            
+            try {
+                const response = await apiCall('/resetCredentials', {
+                    memberId: currentMemberToReset
+                });
+                
+                if (response.success) {
+                    messageDiv.className = 'message success';
+                    messageDiv.textContent = 'Credentials reset! New login details sent via email.';
+                    
+                    setTimeout(() => {
+                        closeResetCredentialsModal();
+                    }, 2000);
+                } else {
+                    messageDiv.className = 'message error';
+                    messageDiv.textContent = response.message || 'Failed to reset credentials';
+                }
+            } catch (error) {
+                messageDiv.className = 'message error';
+                messageDiv.textContent = 'Error resetting credentials. Please try again.';
+                console.error('Reset credentials error:', error);
+            }
+        }
+
+        // Close modals when clicking outside
+        window.onclick = function(event) {
+            if (event.target.classList.contains('modal')) {
+                event.target.style.display = 'none';
+            }
+        }
+    </script>
+</body>
+</html>

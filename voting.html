@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Book Club - Voting</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-container">
+            <h1 class="nav-logo">📚 Book Club</h1>
+            <div class="nav-menu">
+                <div class="dropdown">
+                    <button class="dropbtn">Menu ▼</button>
+                    <div class="dropdown-content">
+                        <a href="index.html">Home</a>
+                        <a href="members.html">Member List</a>
+                        <a href="calendar.html">Calendar</a>
+                        <a href="books-read.html">Books Read</a>
+                        <a href="nominations.html">Book Nominations</a>
+                        <a href="voting.html">Voting</a>
+                    </div>
+                </div>
+                <div id="userInfo" class="user-info"></div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="page-header">
+            <h1>🗳️ Book Voting</h1>
+        </div>
+
+        <!-- Admin Controls -->
+        <div id="adminControls" class="admin-section" style="display: none;">
+            <h2>Admin Controls</h2>
+            <div id="noVotingState" style="display: none;">
+                <div class="form-group">
+                    <label for="votesPerUser">Votes per user:</label>
+                    <input type="number" id="votesPerUser" min="1" value="3" style="width: 100px;">
+                </div>
+                <button onclick="startVoting()" class="btn btn-primary">Start Voting</button>
+            </div>
+            <div id="activeVotingState" style="display: none;">
+                <p><strong>Current Round:</strong> <span id="currentRound"></span></p>
+                <p><strong>Votes per user:</strong> <span id="votesAllowed"></span></p>
+                <button onclick="showResultsAndNextRound()" class="btn btn-secondary">Show Results & Next Round</button>
+            </div>
+            <div id="resultsState" style="display: none;">
+                <button onclick="selectBooksForNextRound()" class="btn btn-primary">Advance Selected Books</button>
+                <button onclick="selectFinalBook()" class="btn btn-success">Select Final Book!</button>
+            </div>
+        </div>
+
+        <!-- Voting Status -->
+        <div id="votingStatus" class="voting-status">
+            <p class="loading">Loading voting status...</p>
+        </div>
+
+        <!-- Voting Grid -->
+        <div id="votingGrid" class="voting-grid" style="display: none;">
+            <!-- Will be populated dynamically -->
+        </div>
+
+        <!-- Results Display -->
+        <div id="resultsDisplay" style="display: none;">
+            <h2>Round Results</h2>
+            <div id="resultsGrid" class="results-grid"></div>
+        </div>
+
+        <!-- Submit Vote Button -->
+        <div id="submitVoteSection" style="display: none; text-align: center; margin: 30px 0;">
+            <button onclick="submitVotes()" class="btn btn-primary btn-large">Submit My Votes</button>
+            <p id="voteCount" class="vote-count"></p>
+        </div>
+    </div>
+
+    <footer>
+        <p>&copy; 2026 Book Club. Powered by books and friendship.</p>
+    </footer>
+
+    <script src="app.js"></script>
+    <script>
+        let votingSession = null;
+        let selectedBooks = new Set();
+        let maxVotes = 0;
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            await initAuth();
+            checkAdminStatus();
+            loadVotingStatus();
+        });
+
+        function checkAdminStatus() {
+            const user = JSON.parse(localStorage.getItem('bookClubUser'));
+            if (user && user.isAdmin) {
+                document.getElementById('adminControls').style.display = 'block';
+            }
+        }
+
+        async function loadVotingStatus() {
+            try {
+                const response = await apiCall('/getVotingStatus');
+                const statusDiv = document.getElementById('votingStatus');
+                
+                if (response.success) {
+                    votingSession = response.session;
+                    
+                    if (!votingSession) {
+                        // No active voting
+                        statusDiv.innerHTML = '<p class="no-data">No active voting session. Waiting for admin to start voting.</p>';
+                        document.getElementById('noVotingState').style.display = 'block';
+                        document.getElementById('activeVotingState').style.display = 'none';
+                        document.getElementById('resultsState').style.display = 'none';
+                    } else if (votingSession.status === 'voting') {
+                        // Active voting
+                        statusDiv.innerHTML = `<p class="info">Round ${votingSession.currentRound} - Select up to ${votingSession.votesPerUser} books</p>`;
+                        document.getElementById('noVotingState').style.display = 'none';
+                        document.getElementById('activeVotingState').style.display = 'block';
+                        document.getElementById('resultsState').style.display = 'none';
+                        document.getElementById('currentRound').textContent = votingSession.currentRound;
+                        document.getElementById('votesAllowed').textContent = votingSession.votesPerUser;
+                        
+                        maxVotes = votingSession.votesPerUser;
+                        loadVotingBooks();
+                    } else if (votingSession.status === 'results') {
+                        // Showing results
+                        statusDiv.innerHTML = `<p class="info">Round ${votingSession.currentRound} Results</p>`;
+                        document.getElementById('noVotingState').style.display = 'none';
+                        document.getElementById('activeVotingState').style.display = 'none';
+                        document.getElementById('resultsState').style.display = 'block';
+                        
+                        loadResults();
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading voting status:', error);
+                document.getElementById('votingStatus').innerHTML = '<p class="error">Failed to load voting status</p>';
+            }
+        }
+
+        async function loadVotingBooks() {
+            try {
+                const response = await apiCall('/getVotingBooks');
+                const grid = document.getElementById('votingGrid');
+                
+                if (response.success && response.books.length > 0) {
+                    // Check if user already voted
+                    const userVotes = response.userVotes || [];
+                    selectedBooks = new Set(userVotes);
+                    
+                    grid.innerHTML = response.books.map(book => `
+                        <div class="voting-book-card ${userVotes.includes(book.id) ? 'selected' : ''}" 
+                             onclick="toggleBookSelection('${book.id}')">
+                            <div class="book-card-image">
+                                ${book.imageUrl ? `<img src="${book.imageUrl}" alt="${book.title}">` : '<div class="no-image">📚</div>'}
+                            </div>
+                            <div class="book-card-content">
+                                <h3>${book.title}</h3>
+                                <p class="author">by ${book.author}</p>
+                                <p class="nominated-by">Nominated by: ${book.nominatedBy}</p>
+                                <div class="book-links">
+                                    ${book.amazonLink ? `<a href="${book.amazonLink}" target="_blank" onclick="event.stopPropagation()" class="btn btn-secondary btn-small">Amazon</a>` : ''}
+                                    ${book.goodreadsLink ? `<a href="${book.goodreadsLink}" target="_blank" onclick="event.stopPropagation()" class="btn btn-secondary btn-small">Goodreads</a>` : ''}
+                                </div>
+                            </div>
+                            <div class="selection-indicator">✓</div>
+                        </div>
+                    `).join('');
+                    
+                    grid.style.display = 'grid';
+                    document.getElementById('submitVoteSection').style.display = 'block';
+                    updateVoteCount();
+                } else {
+                    grid.innerHTML = '<p class="no-data">No books available for voting</p>';
+                    grid.style.display = 'block';
+                }
+            } catch (error) {
+                console.error('Error loading voting books:', error);
+            }
+        }
+
+        function toggleBookSelection(bookId) {
+            if (selectedBooks.has(bookId)) {
+                selectedBooks.delete(bookId);
+            } else {
+                if (selectedBooks.size < maxVotes) {
+                    selectedBooks.add(bookId);
+                } else {
+                    alert(`You can only select up to ${maxVotes} books`);
+                    return;
+                }
+            }
+            
+            // Update UI
+            const card = event.currentTarget;
+            card.classList.toggle('selected');
+            updateVoteCount();
+        }
+
+        function updateVoteCount() {
+            const countText = document.getElementById('voteCount');
+            countText.textContent = `${selectedBooks.size} of ${maxVotes} votes selected`;
+        }
+
+        async function startVoting() {
+            const votesPerUser = document.getElementById('votesPerUser').value;
+            
+            if (!confirm(`Start voting with ${votesPerUser} votes per user?`)) return;
+            
+            try {
+                const response = await apiCall('/startVoting', {
+                    votesPerUser: parseInt(votesPerUser)
+                });
+                
+                if (response.success) {
+                    alert('Voting started!');
+                    loadVotingStatus();
+                } else {
+                    alert(response.message || 'Failed to start voting');
+                }
+            } catch (error) {
+                console.error('Error starting voting:', error);
+                alert('Failed to start voting');
+            }
+        }
+
+        async function submitVotes() {
+            if (selectedBooks.size === 0) {
+                alert('Please select at least one book');
+                return;
+            }
+            
+            try {
+                const response = await apiCall('/submitVotes', {
+                    bookIds: Array.from(selectedBooks)
+                });
+                
+                if (response.success) {
+                    alert('Votes submitted successfully!');
+                    loadVotingStatus();
+                } else {
+                    alert(response.message || 'Failed to submit votes');
+                }
+            } catch (error) {
+                console.error('Error submitting votes:', error);
+                alert('Failed to submit votes');
+            }
+        }
+
+        async function showResultsAndNextRound() {
+            if (!confirm('Show results to all users? They will no longer be able to vote.')) return;
+            
+            try {
+                const response = await apiCall('/showResults');
+                
+                if (response.success) {
+                    loadVotingStatus();
+                } else {
+                    alert(response.message || 'Failed to show results');
+                }
+            } catch (error) {
+                console.error('Error showing results:', error);
+                alert('Failed to show results');
+            }
+        }
+
+        async function loadResults() {
+            try {
+                const response = await apiCall('/getVotingResults');
+                const resultsGrid = document.getElementById('resultsGrid');
+                const votingGrid = document.getElementById('votingGrid');
+                const submitSection = document.getElementById('submitVoteSection');
+                
+                votingGrid.style.display = 'none';
+                submitSection.style.display = 'none';
+                document.getElementById('resultsDisplay').style.display = 'block';
+                
+                if (response.success && response.results.length > 0) {
+                    const user = JSON.parse(localStorage.getItem('bookClubUser'));
+                    const isAdmin = user && user.isAdmin;
+                    
+                    resultsGrid.innerHTML = response.results.map(book => `
+                        <div class="result-card">
+                            ${isAdmin ? `
+                                <label class="select-for-next-round">
+                                    <input type="checkbox" value="${book.id}" class="next-round-checkbox">
+                                    Advance
+                                </label>
+                            ` : ''}
+                            <div class="book-card-image">
+                                ${book.imageUrl ? `<img src="${book.imageUrl}" alt="${book.title}">` : '<div class="no-image">📚</div>'}
+                            </div>
+                            <div class="book-card-content">
+                                <h3>${book.title}</h3>
+                                <p class="author">by ${book.author}</p>
+                                <p class="nominated-by">Nominated by: ${book.nominatedBy}</p>
+                                <div class="vote-count-display">
+                                    <strong>${book.votes} votes</strong>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                }
+            } catch (error) {
+                console.error('Error loading results:', error);
+            }
+        }
+
+        async function selectBooksForNextRound() {
+            const checkboxes = document.querySelectorAll('.next-round-checkbox:checked');
+            const selectedBookIds = Array.from(checkboxes).map(cb => cb.value);
+            
+            if (selectedBookIds.length === 0) {
+                alert('Please select at least one book to advance');
+                return;
+            }
+            
+            const votesPerUser = prompt('How many votes per user for the next round?', '2');
+            if (!votesPerUser) return;
+            
+            try {
+                const response = await apiCall('/nextRound', {
+                    bookIds: selectedBookIds,
+                    votesPerUser: parseInt(votesPerUser)
+                });
+                
+                if (response.success) {
+                    alert('Next round started!');
+                    loadVotingStatus();
+                } else {
+                    alert(response.message || 'Failed to start next round');
+                }
+            } catch (error) {
+                console.error('Error starting next round:', error);
+                alert('Failed to start next round');
+            }
+        }
+
+        async function selectFinalBook() {
+            const checkboxes = document.querySelectorAll('.next-round-checkbox:checked');
+            
+            if (checkboxes.length !== 1) {
+                alert('Please select exactly one book as the final selection');
+                return;
+            }
+            
+            const bookId = checkboxes[0].value;
+            
+            if (!confirm('Select this book as the final choice? This will end voting.')) return;
+            
+            try {
+                const response = await apiCall('/selectFinalBook', {
+                    bookId: bookId
+                });
+                
+                if (response.success) {
+                    alert('Book selected! It is now the current book.');
+                    window.location.href = 'index.html';
+                } else {
+                    alert(response.message || 'Failed to select book');
+                }
+            } catch (error) {
+                console.error('Error selecting final book:', error);
+                alert('Failed to select book');
+            }
+        }
+    </script>
+</body>
+</html>
