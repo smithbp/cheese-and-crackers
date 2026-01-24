@@ -1,6 +1,6 @@
 // Global configuration
 const CONFIG = {
-    apiUrl: 'YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE' // Will be replaced after deployment
+    apiUrl: 'https://script.google.com/macros/s/AKfycbyMFB1RADwrR-HjtKHwKoWGH0em23swCOKYodPOJWMgpnKfVixsrKjOAdVd4Ozv_aug/exec' // Will be replaced after deployment
 };
 
 // API call helper function
