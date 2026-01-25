@@ -105,7 +105,8 @@ function doPost(e) {
     Logger.log('Error in doPost: ' + error.toString());
     return ContentService.createTextOutput(JSON.stringify({
       success: false,
-      error: error.toString()
+      error: error.toString(),
+      message: error.toString()
     })).setMimeType(ContentService.MimeType.JSON);
   }
 }
@@ -178,6 +179,9 @@ function routeRequest(action, data) {
       
     case 'addNomination':
       return addNomination(data, user);
+
+    case 'removeNomination':
+      return removeNomination(data, user);
       
     case 'uploadImage':
       return uploadImage(data);
@@ -205,6 +209,8 @@ function routeRequest(action, data) {
       
     case 'selectFinalBook':
       return selectFinalBook(data, user);
+    case 'restartVoting':
+      return restartVoting(data, user);
       
     default:
       return { success: false, message: 'Unknown endpoint: ' + action };
@@ -227,13 +233,15 @@ function handleLogin(data) {
       // Update token in sheet
       sheet.getRange(i + 1, 9).setValue(token);
       
+      const raw = members[i][6];
+      const isAdmin = (raw === true || raw === 'TRUE' || raw === 'true');
       return {
         success: true,
         user: {
           id: members[i][0],
           name: members[i][1],
           email: members[i][2],
-          isAdmin: members[i][6],
+          isAdmin: isAdmin,
           token: token
         }
       };
@@ -275,7 +283,7 @@ function handleGoogleLogin(data) {
           id: members[i][0],
           name: members[i][1],
           email: members[i][2],
-          isAdmin: members[i][6],
+          isAdmin: (members[i][6] === true || members[i][6] === 'TRUE' || members[i][6] === 'true'),
           token: token
         }
       };
@@ -300,11 +308,13 @@ function verifyToken(token) {
   
   for (let i = 1; i < members.length; i++) {
     if (members[i][8] === token) {
+      const raw = members[i][6];
+      const isAdmin = (raw === true || raw === 'TRUE' || raw === 'true');
       return {
         id: members[i][0],
         name: members[i][1],
         email: members[i][2],
-        isAdmin: members[i][6]
+        isAdmin: isAdmin
       };
     }
   }
@@ -645,6 +655,7 @@ function getNominations() {
         amazonLink: data[i][3],
         goodreadsLink: data[i][4],
         imageUrl: data[i][5],
+        nominatedById: data[i][6],
         nominatedBy: data[i][7],
         dateNominated: data[i][8]
       });
@@ -675,6 +686,27 @@ function addNomination(data, user) {
   ]);
   
   return { success: true, message: 'Book nominated successfully' };
+}
+
+function removeNomination(data, user) {
+  // Allow admin or the user who nominated to remove a nomination
+  const sheet = getSheet(SHEETS.NOMINATIONS);
+  const nominations = sheet.getDataRange().getValues();
+
+  for (let i = 1; i < nominations.length; i++) {
+    if (nominations[i][0] === data.id) {
+      const nominatedById = nominations[i][6];
+      if (!user || (!user.isAdmin && user.id !== nominatedById)) {
+        return { success: false, message: 'Not authorized to remove this nomination' };
+      }
+
+      // Mark as removed to preserve history
+      sheet.getRange(i + 1, 10).setValue('removed');
+      return { success: true, message: 'Nomination removed' };
+    }
+  }
+
+  return { success: false, message: 'Nomination not found' };
 }
 
 // ============================================
@@ -990,6 +1022,45 @@ function selectFinalBook(data, user) {
       sessionsSheet.getRange(i + 1, 2).setValue('completed');
       sessionsSheet.getRange(i + 1, 6).setValue(new Date().toISOString());
     }
+  }
+  
+  // Archive other nominations from the same pool (active / voting_* / eliminated)
+  for (let i = 1; i < nominations.length; i++) {
+    const rowStatus = nominations[i][9];
+    const rowIndex = i + 1;
+    if (rowIndex === nominationRow) continue; // skip selected
+
+    if (rowStatus === 'active' || rowStatus === 'eliminated' || (rowStatus && rowStatus.indexOf('voting_') === 0)) {
+
+      nominationsSheet.getRange(rowIndex, 10).setValue('archived');
+    }
+
+function restartVoting(data, user) {
+  requireAdmin(user);
+
+  const nominationsSheet = getSheet(SHEETS.NOMINATIONS);
+  const votesSheet = getSheet(SHEETS.VOTES);
+  const sessionsSheet = getSheet(SHEETS.VOTING_SESSIONS);
+
+  // Reset nominations to active unless removed/selected
+  const nominations = nominationsSheet.getDataRange().getValues();
+  for (let i = 1; i < nominations.length; i++) {
+    const status = nominations[i][9];
+    if (status !== 'removed' && status !== 'selected') {
+      nominationsSheet.getRange(i + 1, 10).setValue('active');
+    }
+  }
+
+  // Clear votes and reset header
+  votesSheet.clearContents();
+  votesSheet.getRange(1,1,1,6).setValues([['id','votingSessionId','bookId','userId','round','dateVoted']]);
+
+  // Clear sessions and reset header
+  sessionsSheet.clearContents();
+  sessionsSheet.getRange(1,1,1,6).setValues([['id','status','currentRound','votesPerUser','startDate','endDate']]);
+
+  return { success: true, message: 'Voting restarted to initial state' };
+}
   }
   
   return { success: true, message: 'Book selected as current book' };

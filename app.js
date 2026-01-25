@@ -76,12 +76,16 @@ async function initAuth() {
                 return;
             }
             
-            // Update user info in the navbar
-            if (userInfo) {
-                userInfo.innerHTML = `
-                    <span>Welcome, ${currentUser.name}!</span>
-                    <a href="#" onclick="logout()">Logout</a>
-                `;
+            // Update user info in the navbar and normalize stored user
+            if (response.user) {
+                const verifiedUser = response.user;
+                localStorage.setItem('bookClubUser', JSON.stringify(verifiedUser));
+                if (userInfo) {
+                    userInfo.innerHTML = `
+                        <span>Welcome, ${verifiedUser.name}!</span>
+                        <a href="#" onclick="logout()">Logout</a>
+                    `;
+                }
             }
         } catch (error) {
             console.error('Token verification failed:', error);
@@ -141,6 +145,30 @@ function showAdminOnly(elementId) {
 window.addEventListener('error', function(event) {
     console.error('Global error:', event.error);
 });
+
+// Toast helper (creates container if needed)
+function showToast(message, type = 'info', timeout = 3500) {
+    let container = document.querySelector('.toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.className = 'toast-container';
+        document.body.appendChild(container);
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+
+    // force reflow to enable transition
+    void toast.offsetWidth;
+    toast.classList.add('show');
+
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => container.removeChild(toast), 300);
+    }, timeout);
+}
 
 // Handle API URL configuration warning
 window.addEventListener('DOMContentLoaded', function() {

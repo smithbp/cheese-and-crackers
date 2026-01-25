@@ -110,7 +110,10 @@
                 const grid = document.getElementById('nominationsGrid');
                 
                 if (response.success && response.nominations.length > 0) {
-                    grid.innerHTML = response.nominations.map(book => `
+                    const currentUser = JSON.parse(localStorage.getItem('bookClubUser')) || {};
+                    grid.innerHTML = response.nominations.map(book => {
+                        const canRemove = currentUser.isAdmin === true || (currentUser.id && currentUser.id === book.nominatedById);
+                        return `
                         <div class="book-card">
                             <div class="book-card-image">
                                 ${book.imageUrl ? `<img src="${book.imageUrl}" alt="${book.title}">` : '<div class="no-image">📚</div>'}
@@ -123,10 +126,11 @@
                                 <div class="book-links">
                                     ${book.amazonLink ? `<a href="${book.amazonLink}" target="_blank" class="btn btn-secondary btn-small">Amazon</a>` : ''}
                                     ${book.goodreadsLink ? `<a href="${book.goodreadsLink}" target="_blank" class="btn btn-secondary btn-small">Goodreads</a>` : ''}
+                                    ${canRemove ? `<button class="btn btn-danger btn-small" onclick="confirmRemove('${book.id}')">Remove</button>` : ''}
                                 </div>
                             </div>
                         </div>
-                    `).join('');
+                    `}).join('');
                 } else {
                     grid.innerHTML = '<p class="no-data">No nominations yet. Be the first to nominate a book!</p>';
                 }
@@ -217,6 +221,21 @@
                 reader.onerror = reject;
                 reader.readAsDataURL(file);
             });
+        }
+
+        async function confirmRemove(id) {
+            if (!confirm('Are you sure you want to remove this nomination?')) return;
+            try {
+                const response = await apiCall('/removeNomination', { id: id });
+                if (response.success) {
+                    loadNominations();
+                } else {
+                    showToast(response.message || 'Failed to remove nomination', 'error');
+                }
+            } catch (error) {
+                console.error('Remove nomination error:', error);
+                showToast('Error removing nomination', 'error');
+            }
         }
     </script>
 </body>

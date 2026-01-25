@@ -46,6 +46,7 @@
                 <p><strong>Current Round:</strong> <span id="currentRound"></span></p>
                 <p><strong>Votes per user:</strong> <span id="votesAllowed"></span></p>
                 <button onclick="showResultsAndNextRound()" class="btn btn-secondary">Show Results & Next Round</button>
+                <button onclick="restartVoting()" class="btn btn-danger" style="margin-left:12px;">Restart Voting</button>
             </div>
             <div id="resultsState" style="display: none;">
                 <button onclick="selectBooksForNextRound()" class="btn btn-primary">Advance Selected Books</button>
@@ -188,7 +189,7 @@
                 if (selectedBooks.size < maxVotes) {
                     selectedBooks.add(bookId);
                 } else {
-                    alert(`You can only select up to ${maxVotes} books`);
+                    showToast(`You can only select up to ${maxVotes} books`, 'warn');
                     return;
                 }
             }
@@ -215,20 +216,20 @@
                 });
                 
                 if (response.success) {
-                    alert('Voting started!');
+                    showToast('Voting started!', 'success');
                     loadVotingStatus();
                 } else {
-                    alert(response.message || 'Failed to start voting');
+                    showToast(response.message || 'Failed to start voting', 'error');
                 }
             } catch (error) {
                 console.error('Error starting voting:', error);
-                alert('Failed to start voting');
+                showToast('Failed to start voting', 'error');
             }
         }
 
         async function submitVotes() {
             if (selectedBooks.size === 0) {
-                alert('Please select at least one book');
+                showToast('Please select at least one book', 'warn');
                 return;
             }
             
@@ -238,14 +239,14 @@
                 });
                 
                 if (response.success) {
-                    alert('Votes submitted successfully!');
+                    showToast('Votes submitted successfully!', 'success');
                     loadVotingStatus();
                 } else {
-                    alert(response.message || 'Failed to submit votes');
+                    showToast(response.message || 'Failed to submit votes', 'error');
                 }
             } catch (error) {
                 console.error('Error submitting votes:', error);
-                alert('Failed to submit votes');
+                showToast('Failed to submit votes', 'error');
             }
         }
 
@@ -258,11 +259,11 @@
                 if (response.success) {
                     loadVotingStatus();
                 } else {
-                    alert(response.message || 'Failed to show results');
+                    showToast(response.message || 'Failed to show results', 'error');
                 }
             } catch (error) {
                 console.error('Error showing results:', error);
-                alert('Failed to show results');
+                showToast('Failed to show results', 'error');
             }
         }
 
@@ -313,7 +314,7 @@
             const selectedBookIds = Array.from(checkboxes).map(cb => cb.value);
             
             if (selectedBookIds.length === 0) {
-                alert('Please select at least one book to advance');
+                showToast('Please select at least one book to advance', 'warn');
                 return;
             }
             
@@ -327,14 +328,14 @@
                 });
                 
                 if (response.success) {
-                    alert('Next round started!');
+                    showToast('Next round started!', 'success');
                     loadVotingStatus();
                 } else {
-                    alert(response.message || 'Failed to start next round');
+                    showToast(response.message || 'Failed to start next round', 'error');
                 }
             } catch (error) {
                 console.error('Error starting next round:', error);
-                alert('Failed to start next round');
+                showToast('Failed to start next round', 'error');
             }
         }
 
@@ -342,7 +343,7 @@
             const checkboxes = document.querySelectorAll('.next-round-checkbox:checked');
             
             if (checkboxes.length !== 1) {
-                alert('Please select exactly one book as the final selection');
+                showToast('Please select exactly one book as the final selection', 'warn');
                 return;
             }
             
@@ -356,14 +357,30 @@
                 });
                 
                 if (response.success) {
-                    alert('Book selected! It is now the current book.');
+                    showToast('Book selected! It is now the current book.', 'success');
                     window.location.href = 'index.html';
                 } else {
-                    alert(response.message || 'Failed to select book');
+                    showToast(response.message || 'Failed to select book', 'error');
                 }
             } catch (error) {
                 console.error('Error selecting final book:', error);
-                alert('Failed to select book');
+                showToast('Failed to select book', 'error');
+            }
+        }
+
+        async function restartVoting() {
+            if (!confirm('This will reset voting to the initial state and clear all votes. Continue?')) return;
+            try {
+                const response = await apiCall('/restartVoting');
+                if (response.success) {
+                    showToast('Voting has been restarted', 'success');
+                    loadVotingStatus();
+                } else {
+                    showToast(response.message || 'Failed to restart voting', 'error');
+                }
+            } catch (error) {
+                console.error('Error restarting voting:', error);
+                showToast('Failed to restart voting', 'error');
             }
         }
     </script>
