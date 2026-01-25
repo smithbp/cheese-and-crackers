@@ -93,42 +93,46 @@ function createImageFolder() {
 function doPost(e) {
   try {
     const data = JSON.parse(e.postData.contents);
-    const path = e.parameter.path || '/';
+    const action = data.action || 'unknown';
     
     // Route the request
-    const response = routeRequest(path, data);
+    const response = routeRequest(action, data);
     
     return ContentService.createTextOutput(JSON.stringify(response))
-      .setMimeType(ContentService.MimeType.JSON);
+      .setMimeType(ContentService.MimeType.JSON)
+      .setHeader('Access-Control-Allow-Origin', '*')
+      .setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+      .setHeader('Access-Control-Allow-Headers', 'Content-Type');
       
   } catch (error) {
     Logger.log('Error in doPost: ' + error.toString());
     return ContentService.createTextOutput(JSON.stringify({
       success: false,
       error: error.toString()
-    })).setMimeType(ContentService.MimeType.JSON);
+    })).setMimeType(ContentService.MimeType.JSON)
+      .setHeader('Access-Control-Allow-Origin', '*');
   }
 }
 
 function doGet(e) {
-  const path = e.parameter.path || '/';
-  
-  // Handle GET requests (optional)
+  // Handle CORS preflight and GET requests
   return ContentService.createTextOutput(JSON.stringify({
     success: true,
-    message: 'Book Club API is running',
-    path: path
-  })).setMimeType(ContentService.MimeType.JSON);
+    message: 'Book Club API is running'
+  })).setMimeType(ContentService.MimeType.JSON)
+    .setHeader('Access-Control-Allow-Origin', '*')
+    .setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+    .setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
 // ============================================
 // ROUTING
 // ============================================
 
-function routeRequest(path, data) {
+function routeRequest(action, data) {
   // Public endpoints (no authentication required)
-  if (path === '/login') return handleLogin(data);
-  if (path === '/googleLogin') return handleGoogleLogin(data);
+  if (action === 'login') return handleLogin(data);
+  if (action === 'googleLogin') return handleGoogleLogin(data);
   
   // All other endpoints require authentication
   const user = verifyToken(data.token);
@@ -137,81 +141,81 @@ function routeRequest(path, data) {
   }
   
   // Authenticated endpoints
-  switch (path) {
-    case '/verifyToken':
+  switch (action) {
+    case 'verifyToken':
       return { success: true, user: user };
       
-    case '/getCurrentBook':
+    case 'getCurrentBook':
       return getCurrentBook();
       
-    case '/getNextMeeting':
+    case 'getNextMeeting':
       return getNextMeeting();
       
-    case '/getMembers':
+    case 'getMembers':
       return getMembers();
       
-    case '/addMember':
+    case 'addMember':
       return addMember(data, user);
       
-    case '/removeMember':
+    case 'removeMember':
       return removeMember(data, user);
       
-    case '/resetCredentials':
+    case 'resetCredentials':
       return resetCredentials(data, user);
       
-    case '/getCalendarUrl':
+    case 'getCalendarUrl':
       return getCalendarUrl(user);
       
-    case '/getCalendarSettings':
+    case 'getCalendarSettings':
       return getCalendarSettings(user);
       
-    case '/saveCalendarSettings':
+    case 'saveCalendarSettings':
       return saveCalendarSettings(data, user);
       
-    case '/getBooksRead':
+    case 'getBooksRead':
       return getBooksRead();
       
-    case '/getBookDetails':
+    case 'getBookDetails':
       return getBookDetails(data);
       
-    case '/addRating':
+    case 'addRating':
       return addRating(data, user);
       
-    case '/getNominations':
+    case 'getNominations':
       return getNominations();
       
-    case '/addNomination':
+    case 'addNomination':
       return addNomination(data, user);
       
-    case '/uploadImage':
+    case 'uploadImage':
       return uploadImage(data);
       
-    case '/getVotingStatus':
+    case 'getVotingStatus':
       return getVotingStatus();
       
-    case '/getVotingBooks':
+    case 'getVotingBooks':
       return getVotingBooks(user);
       
-    case '/startVoting':
+    case 'startVoting':
       return startVoting(data, user);
       
-    case '/submitVotes':
+    case 'submitVotes':
       return submitVotes(data, user);
       
-    case '/showResults':
+    case 'showResults':
       return showResults(user);
       
-    case '/getVotingResults':
+    case 'getVotingResults':
       return getVotingResults();
       
-    case '/nextRound':
+    case 'nextRound':
       return nextRound(data, user);
       
-    case '/selectFinalBook':
+    case 'selectFinalBook':
       return selectFinalBook(data, user);
       
     default:
-      return { success: false, message: 'Unknown endpoint: ' + path };
+      return { success: false, message: 'Unknown endpoint: ' + action };
   }
 }
 

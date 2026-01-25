@@ -8,7 +8,7 @@ async function apiCall(endpoint, data = null) {
     const currentUser = JSON.parse(localStorage.getItem('bookClubUser'));
     const token = currentUser ? currentUser.token : null;
     
-    const url = CONFIG.apiUrl + endpoint;
+    const url = CONFIG.apiUrl;
     
     const options = {
         method: 'POST',
@@ -16,6 +16,7 @@ async function apiCall(endpoint, data = null) {
             'Content-Type': 'application/json'
         },
         body: JSON.stringify({
+            action: endpoint,
             ...data,
             token: token
         })
