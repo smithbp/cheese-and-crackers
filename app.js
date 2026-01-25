@@ -13,7 +13,7 @@ async function apiCall(endpoint, data = null) {
     const options = {
         method: 'POST',
         headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'text/plain'  // Use text/plain to avoid CORS preflight
         },
         body: JSON.stringify({
             action: endpoint,
