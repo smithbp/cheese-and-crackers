@@ -314,7 +314,8 @@ function verifyToken(token) {
         id: members[i][0],
         name: members[i][1],
         email: members[i][2],
-        isAdmin: isAdmin
+        isAdmin: isAdmin,
+        token: token
       };
     }
   }
@@ -1034,6 +1035,10 @@ function selectFinalBook(data, user) {
 
       nominationsSheet.getRange(rowIndex, 10).setValue('archived');
     }
+  }
+
+  return { success: true, message: 'Book selected as current book' };
+}
 
 function restartVoting(data, user) {
   requireAdmin(user);
@@ -1060,10 +1065,6 @@ function restartVoting(data, user) {
   sessionsSheet.getRange(1,1,1,6).setValues([['id','status','currentRound','votesPerUser','startDate','endDate']]);
 
   return { success: true, message: 'Voting restarted to initial state' };
-}
-  }
-  
-  return { success: true, message: 'Book selected as current book' };
 }
 
 // ============================================
