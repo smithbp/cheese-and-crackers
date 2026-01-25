@@ -99,40 +99,22 @@ function doPost(e) {
     const response = routeRequest(action, data);
     
     return ContentService.createTextOutput(JSON.stringify(response))
-      .setMimeType(ContentService.MimeType.JSON)
-      .setHeader('Access-Control-Allow-Origin', '*')
-      .setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-      .setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      .setMimeType(ContentService.MimeType.JSON);
       
   } catch (error) {
     Logger.log('Error in doPost: ' + error.toString());
     return ContentService.createTextOutput(JSON.stringify({
       success: false,
       error: error.toString()
-    })).setMimeType(ContentService.MimeType.JSON)
-      .setHeader('Access-Control-Allow-Origin', '*');
+    })).setMimeType(ContentService.MimeType.JSON);
   }
 }
 
 function doGet(e) {
-  // Handle CORS preflight and GET requests
   return ContentService.createTextOutput(JSON.stringify({
     success: true,
     message: 'Book Club API is running'
-  })).setMimeType(ContentService.MimeType.JSON)
-    .setHeader('Access-Control-Allow-Origin', '*')
-    .setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-    .setHeader('Access-Control-Allow-Headers', 'Content-Type');
-}
-
-// Handle OPTIONS requests for CORS preflight
-function doOptions(e) {
-  return ContentService.createTextOutput('')
-    .setMimeType(ContentService.MimeType.TEXT)
-    .setHeader('Access-Control-Allow-Origin', '*')
-    .setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-    .setHeader('Access-Control-Allow-Headers', 'Content-Type')
-    .setHeader('Access-Control-Max-Age', '3600');
+  })).setMimeType(ContentService.MimeType.JSON);
 }
 
 // ============================================

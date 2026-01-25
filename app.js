@@ -1,6 +1,6 @@
 // Global configuration
 const CONFIG = {
-    apiUrl: 'https://script.google.com/macros/s/AKfycbwuvQIlE9h2VnF6JYY5IpcawDCmBS1u2a8dEoOGR4dBAPMyEP8VIziJsHYpQ4Mnzl6n/exec'
+    apiUrl: 'https://script.google.com/macros/s/AKfycbyFC_m94zcm6nCfEWX1TIuiphElBFj5VZe89uSUeOZZGuj473ZCeE8ZfyRTMdvQ03kP/exec'
 };
 
 // API call helper function
