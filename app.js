@@ -10,13 +10,16 @@ async function apiCall(endpoint, data = null) {
     
     const url = CONFIG.apiUrl;
     
+    // Remove leading slash from endpoint if present to match backend action names
+    const action = endpoint.startsWith('/') ? endpoint.substring(1) : endpoint;
+    
     const options = {
         method: 'POST',
         headers: {
             'Content-Type': 'text/plain'  // Use text/plain to avoid CORS preflight
         },
         body: JSON.stringify({
-            action: endpoint,
+            action: action,
             ...data,
             token: token
         })
