@@ -7,6 +7,7 @@
 
 // Spreadsheet configuration - You'll need to update this with your spreadsheet ID
 const SPREADSHEET_ID = 'YOUR_SPREADSHEET_ID_HERE';
+const GOOGLE_OAUTH_CLIENT_ID = '715797895916-l9hhdfdtefjt6j4dph95jvhuhfo906fi.apps.googleusercontent.com';
 
 // Sheet names
 const SHEETS = {
@@ -21,6 +22,27 @@ const SHEETS = {
 
 // Google Drive folder for image uploads
 let IMAGE_FOLDER_ID = null; // Will be created automatically
+let SPREADSHEET = null;
+
+const CACHE_KEYS = {
+  TOKEN_PREFIX: 'auth:token:',
+  CURRENT_BOOK: 'read:currentBook',
+  BOOKS_READ: 'read:booksRead',
+  NOMINATIONS: 'read:nominations',
+  MEMBERS: 'read:members',
+  VOTING_STATUS: 'read:votingStatus',
+  VOTING_RESULTS: 'read:votingResults',
+  NEXT_MEETING: 'read:nextMeeting',
+  CALENDAR_URL: 'read:calendarUrl',
+  SETTING_PREFIX: 'setting:'
+};
+
+const CACHE_TTL_SECONDS = {
+  TOKEN: 300,
+  FAST: 20,
+  STANDARD: 120,
+  SETTINGS: 300
+};
 
 // ============================================
 // INITIALIZATION
@@ -28,41 +50,41 @@ let IMAGE_FOLDER_ID = null; // Will be created automatically
 
 function initializeSheets() {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  
+
   // Create sheets if they don't exist
   createSheetIfNotExists(ss, SHEETS.MEMBERS, [
     'id', 'name', 'email', 'googleId', 'username', 'password', 'isAdmin', 'created', 'token'
   ]);
-  
+
   createSheetIfNotExists(ss, SHEETS.BOOKS, [
-    'id', 'title', 'author', 'amazonLink', 'goodreadsLink', 'imageUrl', 
+    'id', 'title', 'author', 'amazonLink', 'goodreadsLink', 'imageUrl',
     'nominatedBy', 'status', 'dateSelected', 'dateCompleted'
   ]);
-  
+
   createSheetIfNotExists(ss, SHEETS.NOMINATIONS, [
-    'id', 'title', 'author', 'amazonLink', 'goodreadsLink', 'imageUrl', 
+    'id', 'title', 'author', 'amazonLink', 'goodreadsLink', 'imageUrl',
     'nominatedBy', 'nominatedByName', 'dateNominated', 'status'
   ]);
-  
+
   createSheetIfNotExists(ss, SHEETS.RATINGS, [
     'id', 'bookId', 'userId', 'memberName', 'rating', 'review', 'dateRated'
   ]);
-  
+
   createSheetIfNotExists(ss, SHEETS.VOTES, [
     'id', 'votingSessionId', 'bookId', 'userId', 'round', 'dateVoted'
   ]);
-  
+
   createSheetIfNotExists(ss, SHEETS.VOTING_SESSIONS, [
     'id', 'status', 'currentRound', 'votesPerUser', 'startDate', 'endDate'
   ]);
-  
+
   createSheetIfNotExists(ss, SHEETS.SETTINGS, [
     'key', 'value'
   ]);
-  
+
   // Create image folder if it doesn't exist
   createImageFolder();
-  
+
   return 'Sheets initialized successfully';
 }
 
@@ -94,13 +116,13 @@ function doPost(e) {
   try {
     const data = JSON.parse(e.postData.contents);
     const action = data.action || 'unknown';
-    
+
     // Route the request
     const response = routeRequest(action, data);
-    
+
     return ContentService.createTextOutput(JSON.stringify(response))
       .setMimeType(ContentService.MimeType.JSON);
-      
+
   } catch (error) {
     Logger.log('Error in doPost: ' + error.toString());
     return ContentService.createTextOutput(JSON.stringify({
@@ -126,95 +148,173 @@ function routeRequest(action, data) {
   // Public endpoints (no authentication required)
   if (action === 'login') return handleLogin(data);
   if (action === 'googleLogin') return handleGoogleLogin(data);
-  
+
   // All other endpoints require authentication
   const user = verifyToken(data.token);
   if (!user) {
     return { success: false, error: 'UNAUTHORIZED', message: 'Please log in' };
   }
-  
+
   // Authenticated endpoints
   switch (action) {
     case 'verifyToken':
       return { success: true, user: user };
-      
+
     case 'getCurrentBook':
       return getCurrentBook();
-      
+
     case 'getNextMeeting':
       return getNextMeeting();
-      
+
     case 'getMembers':
       return getMembers();
-      
+
     case 'addMember':
       return addMember(data, user);
-      
+
     case 'removeMember':
       return removeMember(data, user);
-      
+
     case 'resetCredentials':
       return resetCredentials(data, user);
-      
+
     case 'getCalendarUrl':
       return getCalendarUrl(user);
-      
+
     case 'getCalendarSettings':
       return getCalendarSettings(user);
-      
+
     case 'saveCalendarSettings':
       return saveCalendarSettings(data, user);
-      
+
     case 'getBooksRead':
       return getBooksRead();
-      
+
     case 'getBookDetails':
       return getBookDetails(data);
-      
+
     case 'addRating':
       return addRating(data, user);
-      
+
     case 'getNominations':
       return getNominations();
-      
+
     case 'addNomination':
       return addNomination(data, user);
 
     case 'removeNomination':
       return removeNomination(data, user);
-      
+
     case 'uploadImage':
       return uploadImage(data);
-      
+
     case 'getVotingStatus':
       return getVotingStatus();
-      
+
     case 'getVotingBooks':
       return getVotingBooks(user);
-      
+
     case 'startVoting':
       return startVoting(data, user);
-      
+
     case 'submitVotes':
       return submitVotes(data, user);
-      
+
     case 'showResults':
       return showResults(user);
-      
+
     case 'getVotingResults':
       return getVotingResults();
-      
+
     case 'nextRound':
       return nextRound(data, user);
-      
+
     case 'selectFinalBook':
       return selectFinalBook(data, user);
     case 'restartVoting':
       return restartVoting(data, user);
-      
+
     default:
       return { success: false, message: 'Unknown endpoint: ' + action };
   }
+}
+
+function getScriptCache() {
+  return CacheService.getScriptCache();
+}
+
+function getJsonCache(key) {
+  const cached = getScriptCache().get(key);
+  if (!cached) return null;
+  try {
+    return JSON.parse(cached);
+  } catch (error) {
+    return null;
+  }
+}
+
+function setJsonCache(key, value, ttlSeconds) {
+  getScriptCache().put(key, JSON.stringify(value), ttlSeconds);
+}
+
+function removeCacheKeys(keys) {
+  if (!keys || keys.length === 0) return;
+  getScriptCache().removeAll(keys);
+}
+
+function getTokenCacheKey(token) {
+  return CACHE_KEYS.TOKEN_PREFIX + token;
+}
+
+function parseAdminValue(value) {
+  return value === true || value === 'TRUE' || value === 'true';
+}
+
+function cacheUserByToken(user) {
+  if (!user || !user.token) return;
+  setJsonCache(getTokenCacheKey(user.token), user, CACHE_TTL_SECONDS.TOKEN);
+}
+
+function clearTokenCache(token) {
+  if (!token) return;
+  getScriptCache().remove(getTokenCacheKey(token));
+}
+
+function getCachedResponse(key, producer, ttlSeconds) {
+  const cached = getJsonCache(key);
+  if (cached) return cached;
+  const fresh = producer();
+  setJsonCache(key, fresh, ttlSeconds);
+  return fresh;
+}
+
+function clearReadCaches() {
+  removeCacheKeys([
+    CACHE_KEYS.CURRENT_BOOK,
+    CACHE_KEYS.BOOKS_READ,
+    CACHE_KEYS.NOMINATIONS,
+    CACHE_KEYS.MEMBERS,
+    CACHE_KEYS.VOTING_STATUS,
+    CACHE_KEYS.VOTING_RESULTS,
+    CACHE_KEYS.NEXT_MEETING,
+    CACHE_KEYS.CALENDAR_URL
+  ]);
+}
+
+function getCachedSettingValue(key) {
+  const cacheKey = CACHE_KEYS.SETTING_PREFIX + key;
+  const cached = getJsonCache(cacheKey);
+  if (cached && Object.prototype.hasOwnProperty.call(cached, 'value')) {
+    return cached.value;
+  }
+
+  const value = getSetting(key);
+  setJsonCache(cacheKey, { value: value }, CACHE_TTL_SECONDS.SETTINGS);
+  return value;
+}
+
+function clearSettingCache(key) {
+  getScriptCache().remove(CACHE_KEYS.SETTING_PREFIX + key);
 }
 
 // ============================================
@@ -224,30 +324,33 @@ function routeRequest(action, data) {
 function handleLogin(data) {
   const sheet = getSheet(SHEETS.MEMBERS);
   const members = sheet.getDataRange().getValues();
-  
+
   for (let i = 1; i < members.length; i++) {
     if (members[i][4] === data.username && members[i][5] === data.password) {
       // Generate token
+      const previousToken = members[i][8];
       const token = generateToken();
-      
+
       // Update token in sheet
       sheet.getRange(i + 1, 9).setValue(token);
-      
-      const raw = members[i][6];
-      const isAdmin = (raw === true || raw === 'TRUE' || raw === 'true');
+
+      clearTokenCache(previousToken);
+      const isAdmin = parseAdminValue(members[i][6]);
+      const user = {
+        id: members[i][0],
+        name: members[i][1],
+        email: members[i][2],
+        isAdmin: isAdmin,
+        token: token
+      };
+      cacheUserByToken(user);
       return {
         success: true,
-        user: {
-          id: members[i][0],
-          name: members[i][1],
-          email: members[i][2],
-          isAdmin: isAdmin,
-          token: token
-        }
+        user: user
       };
     }
   }
-  
+
   return { success: false, message: 'Invalid username or password' };
 }
 
@@ -257,69 +360,119 @@ function handleGoogleLogin(data) {
   if (!ticket) {
     return { success: false, message: 'Invalid Google token' };
   }
-  
+
   const payload = ticket.getPayload();
   const googleId = payload['sub'];
-  const email = payload['email'];
-  
+  const email = (payload['email'] || '').toLowerCase().trim();
+  if (!googleId || !email) {
+    return { success: false, message: 'Invalid Google account data' };
+  }
+
   const sheet = getSheet(SHEETS.MEMBERS);
   const members = sheet.getDataRange().getValues();
-  
+
   // Find member by googleId or email
   for (let i = 1; i < members.length; i++) {
-    if (members[i][3] === googleId || members[i][2] === email) {
+    const memberGoogleId = members[i][3];
+    const memberEmail = (members[i][2] || '').toLowerCase().trim();
+    const hasGoogleId = !!memberGoogleId;
+    const matchesGoogleId = hasGoogleId && memberGoogleId === googleId;
+    const matchesEmail = !hasGoogleId && !!memberEmail && memberEmail === email;
+
+    if (matchesGoogleId || matchesEmail) {
       // Update googleId if not set
-      if (!members[i][3]) {
+      if (!hasGoogleId) {
         sheet.getRange(i + 1, 4).setValue(googleId);
       }
-      
+
       // Generate token
+      const previousToken = members[i][8];
       const token = generateToken();
       sheet.getRange(i + 1, 9).setValue(token);
-      
+      clearTokenCache(previousToken);
+      const user = {
+        id: members[i][0],
+        name: members[i][1],
+        email: members[i][2],
+        isAdmin: parseAdminValue(members[i][6]),
+        token: token
+      };
+      cacheUserByToken(user);
+
       return {
         success: true,
-        user: {
-          id: members[i][0],
-          name: members[i][1],
-          email: members[i][2],
-          isAdmin: (members[i][6] === true || members[i][6] === 'TRUE' || members[i][6] === 'true'),
-          token: token
-        }
+        user: user
       };
     }
   }
-  
+
   return { success: false, message: 'User not found. Please contact an administrator.' };
 }
 
 function verifyGoogleToken(credential) {
-  // Note: In production, you should verify the Google token server-side
-  // For now, we'll trust the client-side verification
-  // You can use OAuth2 library for proper verification
-  return { getPayload: () => ({ sub: '', email: credential }) };
+  if (!credential || typeof credential !== 'string') return null;
+
+  try {
+    const response = UrlFetchApp.fetch(
+      'https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(credential),
+      { muteHttpExceptions: true }
+    );
+
+    if (response.getResponseCode() !== 200) {
+      Logger.log('Google token validation failed with status: ' + response.getResponseCode());
+      return null;
+    }
+
+    const payload = JSON.parse(response.getContentText());
+    if (!payload || !payload.sub || !payload.email) return null;
+
+    const issuer = payload.iss;
+    if (issuer !== 'https://accounts.google.com' && issuer !== 'accounts.google.com') {
+      return null;
+    }
+
+    if (!GOOGLE_OAUTH_CLIENT_ID || GOOGLE_OAUTH_CLIENT_ID.indexOf('.apps.googleusercontent.com') === -1) {
+      Logger.log('Google OAuth client ID is not configured correctly');
+      return null;
+    }
+
+    if (payload.aud !== GOOGLE_OAUTH_CLIENT_ID) {
+      return null;
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    if (payload.exp && Number(payload.exp) < now) return null;
+
+    return { getPayload: () => payload };
+  } catch (error) {
+    Logger.log('Google token parse failed: ' + error.toString());
+    return null;
+  }
 }
 
 function verifyToken(token) {
   if (!token) return null;
-  
+
+  const cachedUser = getJsonCache(getTokenCacheKey(token));
+  if (cachedUser) return cachedUser;
+
   const sheet = getSheet(SHEETS.MEMBERS);
   const members = sheet.getDataRange().getValues();
-  
+
   for (let i = 1; i < members.length; i++) {
     if (members[i][8] === token) {
-      const raw = members[i][6];
-      const isAdmin = (raw === true || raw === 'TRUE' || raw === 'true');
-      return {
+      const user = {
         id: members[i][0],
         name: members[i][1],
         email: members[i][2],
-        isAdmin: isAdmin,
+        isAdmin: parseAdminValue(members[i][6]),
         token: token
       };
+      cacheUserByToken(user);
+      return user;
     }
   }
-  
+
   return null;
 }
 
@@ -338,40 +491,42 @@ function requireAdmin(user) {
 // ============================================
 
 function getMembers() {
-  const sheet = getSheet(SHEETS.MEMBERS);
-  const data = sheet.getDataRange().getValues();
-  const members = [];
-  
-  for (let i = 1; i < data.length; i++) {
-    members.push({
-      id: data[i][0],
-      name: data[i][1],
-      email: data[i][2],
-      isAdmin: data[i][6]
-    });
-  }
-  
-  return { success: true, members: members };
+  return getCachedResponse(CACHE_KEYS.MEMBERS, function() {
+    const sheet = getSheet(SHEETS.MEMBERS);
+    const data = sheet.getDataRange().getValues();
+    const members = [];
+
+    for (let i = 1; i < data.length; i++) {
+      members.push({
+        id: data[i][0],
+        name: data[i][1],
+        email: data[i][2],
+        isAdmin: parseAdminValue(data[i][6])
+      });
+    }
+
+    return { success: true, members: members };
+  }, CACHE_TTL_SECONDS.STANDARD);
 }
 
 function addMember(data, user) {
   requireAdmin(user);
-  
+
   const sheet = getSheet(SHEETS.MEMBERS);
   const id = Utilities.getUuid();
   const created = new Date().toISOString();
-  
+
   let username = '';
   let password = '';
-  
+
   if (!data.googleOnly) {
     // Generate username and password
     username = data.name.replace(/\s+/g, '').toLowerCase() + Math.floor(Math.random() * 10000).toString().padStart(4, '0');
     password = generateRandomPassword();
   }
-  
+
   const token = '';
-  
+
   sheet.appendRow([
     id,
     data.name,
@@ -383,51 +538,56 @@ function addMember(data, user) {
     created,
     token
   ]);
-  
+
   // Send welcome email
   sendWelcomeEmail(data.email, data.name, username, password, data.googleOnly);
-  
+  clearReadCaches();
+
   return { success: true, message: 'Member added successfully' };
 }
 
 function removeMember(data, user) {
   requireAdmin(user);
-  
+
   const sheet = getSheet(SHEETS.MEMBERS);
   const members = sheet.getDataRange().getValues();
-  
+
   for (let i = 1; i < members.length; i++) {
     if (members[i][0] === data.memberId) {
+      clearTokenCache(members[i][8]);
       sheet.deleteRow(i + 1);
+      clearReadCaches();
       return { success: true, message: 'Member removed successfully' };
     }
   }
-  
+
   return { success: false, message: 'Member not found' };
 }
 
 function resetCredentials(data, user) {
   requireAdmin(user);
-  
+
   const sheet = getSheet(SHEETS.MEMBERS);
   const members = sheet.getDataRange().getValues();
-  
+
   for (let i = 1; i < members.length; i++) {
     if (members[i][0] === data.memberId) {
       const newPassword = generateRandomPassword();
       const newUsername = members[i][1].replace(/\s+/g, '').toLowerCase() + Math.floor(Math.random() * 10000).toString().padStart(4, '0');
-      
+
+      clearTokenCache(members[i][8]);
       sheet.getRange(i + 1, 5).setValue(newUsername);
       sheet.getRange(i + 1, 6).setValue(newPassword);
       sheet.getRange(i + 1, 9).setValue(''); // Clear token
-      
+
       // Send email with new credentials
       sendCredentialsResetEmail(members[i][2], members[i][1], newUsername, newPassword);
-      
+      clearReadCaches();
+
       return { success: true, message: 'Credentials reset successfully' };
     }
   }
-  
+
   return { success: false, message: 'Member not found' };
 }
 
@@ -446,12 +606,12 @@ function generateRandomPassword() {
 
 function sendWelcomeEmail(email, name, username, password, googleOnly) {
   const websiteUrl = 'https://smithbp.github.io/cheese-and-crackers/'; // Update this with your actual URL
-  
+
   let subject = 'Welcome to the Book Club!';
   let body = `Dear ${name},\n\n`;
   body += `Welcome to our book club! We're excited to have you join us.\n\n`;
   body += `Website: ${websiteUrl}\n\n`;
-  
+
   if (googleOnly) {
     body += `You can log in using your Google account (${email}).\n\n`;
   } else {
@@ -461,16 +621,16 @@ function sendWelcomeEmail(email, name, username, password, googleOnly) {
     body += `You can also log in using your Google account.\n\n`;
     body += `You can change your password after logging in.\n\n`;
   }
-  
+
   body += `Happy reading!\n\n`;
   body += `Best regards,\nThe Book Club Team`;
-  
+
   MailApp.sendEmail(email, subject, body);
 }
 
 function sendCredentialsResetEmail(email, name, username, password) {
   const websiteUrl = 'https://smithbp.github.io/cheese-and-crackers/'; // Update this with your actual URL
-  
+
   let subject = 'Book Club - Password Reset';
   let body = `Dear ${name},\n\n`;
   body += `Your login credentials have been reset.\n\n`;
@@ -480,7 +640,7 @@ function sendCredentialsResetEmail(email, name, username, password) {
   body += `Website: ${websiteUrl}\n\n`;
   body += `Please log in and change your password.\n\n`;
   body += `Best regards,\nThe Book Club Team`;
-  
+
   MailApp.sendEmail(email, subject, body);
 }
 
@@ -489,14 +649,58 @@ function sendCredentialsResetEmail(email, name, username, password) {
 // ============================================
 
 function getCurrentBook() {
-  const sheet = getSheet(SHEETS.BOOKS);
-  const books = sheet.getDataRange().getValues();
-  
-  for (let i = 1; i < books.length; i++) {
-    if (books[i][7] === 'current') {
-      return {
-        success: true,
-        book: {
+  return getCachedResponse(CACHE_KEYS.CURRENT_BOOK, function() {
+    const sheet = getSheet(SHEETS.BOOKS);
+    const books = sheet.getDataRange().getValues();
+
+    for (let i = 1; i < books.length; i++) {
+      if (books[i][7] === 'current') {
+        return {
+          success: true,
+          book: {
+            id: books[i][0],
+            title: books[i][1],
+            author: books[i][2],
+            amazonLink: books[i][3],
+            goodreadsLink: books[i][4],
+            imageUrl: books[i][5],
+            nominatedBy: books[i][6],
+            dateSelected: books[i][8]
+          }
+        };
+      }
+    }
+
+    return { success: true, book: null };
+  }, CACHE_TTL_SECONDS.STANDARD);
+}
+
+function getBooksRead() {
+  return getCachedResponse(CACHE_KEYS.BOOKS_READ, function() {
+    const sheet = getSheet(SHEETS.BOOKS);
+    const ratingsSheet = getSheet(SHEETS.RATINGS);
+
+    const books = sheet.getDataRange().getValues();
+    const ratings = ratingsSheet.getDataRange().getValues();
+
+    const completedBooks = [];
+
+    for (let i = 1; i < books.length; i++) {
+      if (books[i][7] === 'completed') {
+        // Calculate average rating
+        let totalRating = 0;
+        let ratingCount = 0;
+
+        for (let j = 1; j < ratings.length; j++) {
+          if (ratings[j][1] === books[i][0]) {
+            totalRating += ratings[j][4];
+            ratingCount++;
+          }
+        }
+
+        const avgRating = ratingCount > 0 ? totalRating / ratingCount : 0;
+
+        completedBooks.push({
           id: books[i][0],
           title: books[i][1],
           author: books[i][2],
@@ -504,73 +708,33 @@ function getCurrentBook() {
           goodreadsLink: books[i][4],
           imageUrl: books[i][5],
           nominatedBy: books[i][6],
-          dateSelected: books[i][8]
-        }
-      };
-    }
-  }
-  
-  return { success: true, book: null };
-}
-
-function getBooksRead() {
-  const sheet = getSheet(SHEETS.BOOKS);
-  const ratingsSheet = getSheet(SHEETS.RATINGS);
-  
-  const books = sheet.getDataRange().getValues();
-  const ratings = ratingsSheet.getDataRange().getValues();
-  
-  const completedBooks = [];
-  
-  for (let i = 1; i < books.length; i++) {
-    if (books[i][7] === 'completed') {
-      // Calculate average rating
-      let totalRating = 0;
-      let ratingCount = 0;
-      
-      for (let j = 1; j < ratings.length; j++) {
-        if (ratings[j][1] === books[i][0]) {
-          totalRating += ratings[j][4];
-          ratingCount++;
-        }
+          dateCompleted: books[i][9],
+          avgRating: avgRating,
+          ratingCount: ratingCount
+        });
       }
-      
-      const avgRating = ratingCount > 0 ? totalRating / ratingCount : 0;
-      
-      completedBooks.push({
-        id: books[i][0],
-        title: books[i][1],
-        author: books[i][2],
-        amazonLink: books[i][3],
-        goodreadsLink: books[i][4],
-        imageUrl: books[i][5],
-        nominatedBy: books[i][6],
-        dateCompleted: books[i][9],
-        avgRating: avgRating,
-        ratingCount: ratingCount
-      });
     }
-  }
-  
-  // Sort by date completed (most recent first)
-  completedBooks.sort((a, b) => new Date(b.dateCompleted) - new Date(a.dateCompleted));
-  
-  return { success: true, books: completedBooks };
+
+    // Sort by date completed (most recent first)
+    completedBooks.sort((a, b) => new Date(b.dateCompleted) - new Date(a.dateCompleted));
+
+    return { success: true, books: completedBooks };
+  }, CACHE_TTL_SECONDS.STANDARD);
 }
 
 function getBookDetails(data) {
   const sheet = getSheet(SHEETS.BOOKS);
   const ratingsSheet = getSheet(SHEETS.RATINGS);
-  
+
   const books = sheet.getDataRange().getValues();
   const allRatings = ratingsSheet.getDataRange().getValues();
-  
+
   for (let i = 1; i < books.length; i++) {
     if (books[i][0] === data.bookId) {
       // Get ratings for this book
       const bookRatings = [];
       let totalRating = 0;
-      
+
       for (let j = 1; j < allRatings.length; j++) {
         if (allRatings[j][1] === data.bookId) {
           bookRatings.push({
@@ -583,9 +747,9 @@ function getBookDetails(data) {
           totalRating += allRatings[j][4];
         }
       }
-      
+
       const avgRating = bookRatings.length > 0 ? totalRating / bookRatings.length : 0;
-      
+
       return {
         success: true,
         book: {
@@ -604,14 +768,14 @@ function getBookDetails(data) {
       };
     }
   }
-  
+
   return { success: false, message: 'Book not found' };
 }
 
 function addRating(data, user) {
   const sheet = getSheet(SHEETS.RATINGS);
   const ratings = sheet.getDataRange().getValues();
-  
+
   // Check if user already rated this book
   for (let i = 1; i < ratings.length; i++) {
     if (ratings[i][1] === data.bookId && ratings[i][2] === user.id) {
@@ -619,10 +783,11 @@ function addRating(data, user) {
       sheet.getRange(i + 1, 5).setValue(data.rating);
       sheet.getRange(i + 1, 6).setValue(data.review || '');
       sheet.getRange(i + 1, 7).setValue(new Date().toISOString());
+      clearReadCaches();
       return { success: true, message: 'Rating updated successfully' };
     }
   }
-  
+
   // Add new rating
   const id = Utilities.getUuid();
   sheet.appendRow([
@@ -634,7 +799,8 @@ function addRating(data, user) {
     data.review || '',
     new Date().toISOString()
   ]);
-  
+  clearReadCaches();
+
   return { success: true, message: 'Rating added successfully' };
 }
 
@@ -643,36 +809,38 @@ function addRating(data, user) {
 // ============================================
 
 function getNominations() {
-  const sheet = getSheet(SHEETS.NOMINATIONS);
-  const data = sheet.getDataRange().getValues();
-  const nominations = [];
-  
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][9] === 'active') {
-      nominations.push({
-        id: data[i][0],
-        title: data[i][1],
-        author: data[i][2],
-        amazonLink: data[i][3],
-        goodreadsLink: data[i][4],
-        imageUrl: data[i][5],
-        nominatedById: data[i][6],
-        nominatedBy: data[i][7],
-        dateNominated: data[i][8]
-      });
+  return getCachedResponse(CACHE_KEYS.NOMINATIONS, function() {
+    const sheet = getSheet(SHEETS.NOMINATIONS);
+    const data = sheet.getDataRange().getValues();
+    const nominations = [];
+
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][9] === 'active') {
+        nominations.push({
+          id: data[i][0],
+          title: data[i][1],
+          author: data[i][2],
+          amazonLink: data[i][3],
+          goodreadsLink: data[i][4],
+          imageUrl: data[i][5],
+          nominatedById: data[i][6],
+          nominatedBy: data[i][7],
+          dateNominated: data[i][8]
+        });
+      }
     }
-  }
-  
-  // Sort by date nominated (most recent first)
-  nominations.sort((a, b) => new Date(b.dateNominated) - new Date(a.dateNominated));
-  
-  return { success: true, nominations: nominations };
+
+    // Sort by date nominated (most recent first)
+    nominations.sort((a, b) => new Date(b.dateNominated) - new Date(a.dateNominated));
+
+    return { success: true, nominations: nominations };
+  }, CACHE_TTL_SECONDS.STANDARD);
 }
 
 function addNomination(data, user) {
   const sheet = getSheet(SHEETS.NOMINATIONS);
   const id = Utilities.getUuid();
-  
+
   sheet.appendRow([
     id,
     data.title,
@@ -685,7 +853,8 @@ function addNomination(data, user) {
     new Date().toISOString(),
     'active'
   ]);
-  
+  clearReadCaches();
+
   return { success: true, message: 'Book nominated successfully' };
 }
 
@@ -703,6 +872,7 @@ function removeNomination(data, user) {
 
       // Mark as removed to preserve history
       sheet.getRange(i + 1, 10).setValue('removed');
+      clearReadCaches();
       return { success: true, message: 'Nomination removed' };
     }
   }
@@ -718,18 +888,18 @@ function uploadImage(data) {
   try {
     const folderId = getSetting('imageFolderId') || IMAGE_FOLDER_ID;
     const folder = DriveApp.getFolderById(folderId);
-    
+
     const blob = Utilities.newBlob(
       Utilities.base64Decode(data.data),
       data.mimeType,
       data.fileName
     );
-    
+
     const file = folder.createFile(blob);
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    
+
     const url = 'https://drive.google.com/uc?export=view&id=' + file.getId();
-    
+
     return { success: true, url: url };
   } catch (error) {
     return { success: false, message: error.toString() };
@@ -741,25 +911,29 @@ function uploadImage(data) {
 // ============================================
 
 function getVotingStatus() {
-  const sheet = getSheet(SHEETS.VOTING_SESSIONS);
-  const sessions = sheet.getDataRange().getValues();
-  
-  // Find active or results session
-  for (let i = 1; i < sessions.length; i++) {
-    if (sessions[i][1] === 'voting' || sessions[i][1] === 'results') {
-      return {
-        success: true,
-        session: {
-          id: sessions[i][0],
-          status: sessions[i][1],
-          currentRound: sessions[i][2],
-          votesPerUser: sessions[i][3]
-        }
-      };
+  return getCachedResponse(CACHE_KEYS.VOTING_STATUS, function() {
+    const sheet = getSheet(SHEETS.VOTING_SESSIONS);
+    const sessions = sheet.getDataRange().getValues();
+
+    // Find active or results session
+    for (let i = 1; i < sessions.length; i++) {
+      if (sessions[i][1] === 'voting' || sessions[i][1] === 'results') {
+        const currentRound = parseInt(sessions[i][2], 10);
+        const votesPerUser = parseInt(sessions[i][3], 10);
+        return {
+          success: true,
+          session: {
+            id: sessions[i][0],
+            status: sessions[i][1],
+            currentRound: isNaN(currentRound) ? 1 : currentRound,
+            votesPerUser: isNaN(votesPerUser) ? 1 : votesPerUser
+          }
+        };
+      }
     }
-  }
-  
-  return { success: true, session: null };
+
+    return { success: true, session: null };
+  }, CACHE_TTL_SECONDS.FAST);
 }
 
 function getVotingBooks(user) {
@@ -767,17 +941,17 @@ function getVotingBooks(user) {
   if (!statusResponse.session) {
     return { success: false, message: 'No active voting session' };
   }
-  
+
   const session = statusResponse.session;
   const nominationsSheet = getSheet(SHEETS.NOMINATIONS);
   const votesSheet = getSheet(SHEETS.VOTES);
-  
+
   const nominations = nominationsSheet.getDataRange().getValues();
   const votes = votesSheet.getDataRange().getValues();
-  
+
   const books = [];
   const userVotes = [];
-  
+
   // Get books for this round
   for (let i = 1; i < nominations.length; i++) {
     if (nominations[i][9] === 'voting_' + session.currentRound) {
@@ -792,44 +966,49 @@ function getVotingBooks(user) {
       });
     }
   }
-  
+
   // Get user's votes for this session and round
   for (let i = 1; i < votes.length; i++) {
     if (votes[i][1] === session.id && votes[i][3] === user.id && votes[i][4] === session.currentRound) {
       userVotes.push(votes[i][2]);
     }
   }
-  
+
   return { success: true, books: books, userVotes: userVotes };
 }
 
 function startVoting(data, user) {
   requireAdmin(user);
-  
+  const votesPerUser = parseInt(data.votesPerUser, 10);
+  if (isNaN(votesPerUser) || votesPerUser < 1 || votesPerUser > 10) {
+    return { success: false, message: 'Votes per user must be a number between 1 and 10' };
+  }
+
   // Get all active nominations
   const nominationsSheet = getSheet(SHEETS.NOMINATIONS);
   const nominations = nominationsSheet.getDataRange().getValues();
-  
+
   // Mark active nominations as voting_1
   for (let i = 1; i < nominations.length; i++) {
     if (nominations[i][9] === 'active') {
       nominationsSheet.getRange(i + 1, 10).setValue('voting_1');
     }
   }
-  
+
   // Create voting session
   const sessionsSheet = getSheet(SHEETS.VOTING_SESSIONS);
   const id = Utilities.getUuid();
-  
+
   sessionsSheet.appendRow([
     id,
     'voting',
     1, // round
-    data.votesPerUser,
+    votesPerUser,
     new Date().toISOString(),
     ''
   ]);
-  
+  clearReadCaches();
+
   return { success: true, message: 'Voting started' };
 }
 
@@ -838,18 +1017,18 @@ function submitVotes(data, user) {
   if (!statusResponse.session || statusResponse.session.status !== 'voting') {
     return { success: false, message: 'No active voting session' };
   }
-  
+
   const session = statusResponse.session;
   const votesSheet = getSheet(SHEETS.VOTES);
   const votes = votesSheet.getDataRange().getValues();
-  
+
   // Delete existing votes for this user in this round
   for (let i = votes.length - 1; i >= 1; i--) {
     if (votes[i][1] === session.id && votes[i][3] === user.id && votes[i][4] === session.currentRound) {
       votesSheet.deleteRow(i + 1);
     }
   }
-  
+
   // Add new votes
   for (let bookId of data.bookIds) {
     const id = Utilities.getUuid();
@@ -862,86 +1041,94 @@ function submitVotes(data, user) {
       new Date().toISOString()
     ]);
   }
-  
+  clearReadCaches();
+
   return { success: true, message: 'Votes submitted' };
 }
 
 function showResults(user) {
   requireAdmin(user);
-  
+
   const sessionsSheet = getSheet(SHEETS.VOTING_SESSIONS);
   const sessions = sessionsSheet.getDataRange().getValues();
-  
+
   for (let i = 1; i < sessions.length; i++) {
     if (sessions[i][1] === 'voting') {
       sessionsSheet.getRange(i + 1, 2).setValue('results');
+      clearReadCaches();
       return { success: true, message: 'Results displayed' };
     }
   }
-  
+
   return { success: false, message: 'No active voting session' };
 }
 
 function getVotingResults() {
-  const statusResponse = getVotingStatus();
-  if (!statusResponse.session) {
-    return { success: false, message: 'No voting session' };
-  }
-  
-  const session = statusResponse.session;
-  const nominationsSheet = getSheet(SHEETS.NOMINATIONS);
-  const votesSheet = getSheet(SHEETS.VOTES);
-  
-  const nominations = nominationsSheet.getDataRange().getValues();
-  const votes = votesSheet.getDataRange().getValues();
-  
-  const results = [];
-  
-  // Get books for this round
-  for (let i = 1; i < nominations.length; i++) {
-    if (nominations[i][9] === 'voting_' + session.currentRound) {
-      const bookId = nominations[i][0];
-      
-      // Count votes for this book
-      let voteCount = 0;
-      for (let j = 1; j < votes.length; j++) {
-        if (votes[j][1] === session.id && votes[j][2] === bookId && votes[j][4] === session.currentRound) {
-          voteCount++;
-        }
-      }
-      
-      results.push({
-        id: bookId,
-        title: nominations[i][1],
-        author: nominations[i][2],
-        amazonLink: nominations[i][3],
-        goodreadsLink: nominations[i][4],
-        imageUrl: nominations[i][5],
-        nominatedBy: nominations[i][7],
-        votes: voteCount
-      });
+  return getCachedResponse(CACHE_KEYS.VOTING_RESULTS, function() {
+    const statusResponse = getVotingStatus();
+    if (!statusResponse.session) {
+      return { success: false, message: 'No voting session' };
     }
-  }
-  
-  // Sort by votes (descending)
-  results.sort((a, b) => b.votes - a.votes);
-  
-  return { success: true, results: results };
+
+    const session = statusResponse.session;
+    const nominationsSheet = getSheet(SHEETS.NOMINATIONS);
+    const votesSheet = getSheet(SHEETS.VOTES);
+
+    const nominations = nominationsSheet.getDataRange().getValues();
+    const votes = votesSheet.getDataRange().getValues();
+
+    const results = [];
+
+    // Get books for this round
+    for (let i = 1; i < nominations.length; i++) {
+      if (nominations[i][9] === 'voting_' + session.currentRound) {
+        const bookId = nominations[i][0];
+
+        // Count votes for this book
+        let voteCount = 0;
+        for (let j = 1; j < votes.length; j++) {
+          if (votes[j][1] === session.id && votes[j][2] === bookId && votes[j][4] === session.currentRound) {
+            voteCount++;
+          }
+        }
+
+        results.push({
+          id: bookId,
+          title: nominations[i][1],
+          author: nominations[i][2],
+          amazonLink: nominations[i][3],
+          goodreadsLink: nominations[i][4],
+          imageUrl: nominations[i][5],
+          nominatedBy: nominations[i][7],
+          votes: voteCount
+        });
+      }
+    }
+
+    // Sort by votes (descending)
+    results.sort((a, b) => b.votes - a.votes);
+
+    return { success: true, results: results };
+  }, CACHE_TTL_SECONDS.FAST);
 }
 
 function nextRound(data, user) {
   requireAdmin(user);
-  
+  const votesPerUser = parseInt(data.votesPerUser, 10);
+  if (isNaN(votesPerUser) || votesPerUser < 1 || votesPerUser > 10) {
+    return { success: false, message: 'Votes per user must be a number between 1 and 10' };
+  }
+
   const nominationsSheet = getSheet(SHEETS.NOMINATIONS);
   const sessionsSheet = getSheet(SHEETS.VOTING_SESSIONS);
-  
+
   const nominations = nominationsSheet.getDataRange().getValues();
   const sessions = sessionsSheet.getDataRange().getValues();
-  
+
   // Find current session
   let sessionRow = -1;
   let currentRound = 1;
-  
+
   for (let i = 1; i < sessions.length; i++) {
     if (sessions[i][1] === 'results') {
       sessionRow = i + 1;
@@ -949,13 +1136,13 @@ function nextRound(data, user) {
       break;
     }
   }
-  
+
   if (sessionRow === -1) {
     return { success: false, message: 'No results session found' };
   }
-  
+
   const nextRound = currentRound + 1;
-  
+
   // Mark selected books for next round
   for (let i = 1; i < nominations.length; i++) {
     if (data.bookIds.includes(nominations[i][0])) {
@@ -964,29 +1151,30 @@ function nextRound(data, user) {
       nominationsSheet.getRange(i + 1, 10).setValue('eliminated');
     }
   }
-  
+
   // Update session
   sessionsSheet.getRange(sessionRow, 2).setValue('voting');
   sessionsSheet.getRange(sessionRow, 3).setValue(nextRound);
-  sessionsSheet.getRange(sessionRow, 4).setValue(data.votesPerUser);
-  
+  sessionsSheet.getRange(sessionRow, 4).setValue(votesPerUser);
+  clearReadCaches();
+
   return { success: true, message: 'Next round started' };
 }
 
 function selectFinalBook(data, user) {
   requireAdmin(user);
-  
+
   const nominationsSheet = getSheet(SHEETS.NOMINATIONS);
   const booksSheet = getSheet(SHEETS.BOOKS);
   const sessionsSheet = getSheet(SHEETS.VOTING_SESSIONS);
-  
+
   const nominations = nominationsSheet.getDataRange().getValues();
   const sessions = sessionsSheet.getDataRange().getValues();
-  
+
   // Find the selected nomination
   let selectedNomination = null;
   let nominationRow = -1;
-  
+
   for (let i = 1; i < nominations.length; i++) {
     if (nominations[i][0] === data.bookId) {
       selectedNomination = nominations[i];
@@ -994,11 +1182,11 @@ function selectFinalBook(data, user) {
       break;
     }
   }
-  
+
   if (!selectedNomination) {
     return { success: false, message: 'Book not found' };
   }
-  
+
   // Add to Books as current
   const bookId = Utilities.getUuid();
   booksSheet.appendRow([
@@ -1013,10 +1201,10 @@ function selectFinalBook(data, user) {
     new Date().toISOString(),
     ''
   ]);
-  
+
   // Mark nomination as selected
   nominationsSheet.getRange(nominationRow, 10).setValue('selected');
-  
+
   // End voting session
   for (let i = 1; i < sessions.length; i++) {
     if (sessions[i][1] === 'results' || sessions[i][1] === 'voting') {
@@ -1024,7 +1212,7 @@ function selectFinalBook(data, user) {
       sessionsSheet.getRange(i + 1, 6).setValue(new Date().toISOString());
     }
   }
-  
+
   // Archive other nominations from the same pool (active / voting_* / eliminated)
   for (let i = 1; i < nominations.length; i++) {
     const rowStatus = nominations[i][9];
@@ -1036,6 +1224,7 @@ function selectFinalBook(data, user) {
       nominationsSheet.getRange(rowIndex, 10).setValue('archived');
     }
   }
+  clearReadCaches();
 
   return { success: true, message: 'Book selected as current book' };
 }
@@ -1063,6 +1252,7 @@ function restartVoting(data, user) {
   // Clear sessions and reset header
   sessionsSheet.clearContents();
   sessionsSheet.getRange(1,1,1,6).setValues([['id','status','currentRound','votesPerUser','startDate','endDate']]);
+  clearReadCaches();
 
   return { success: true, message: 'Voting restarted to initial state' };
 }
@@ -1074,33 +1264,33 @@ function restartVoting(data, user) {
 function getSetting(key) {
   const sheet = getSheet(SHEETS.SETTINGS);
   const settings = sheet.getDataRange().getValues();
-  
+
   for (let i = 1; i < settings.length; i++) {
     if (settings[i][0] === key) {
       return settings[i][1];
     }
   }
-  
+
   return null;
 }
 
 function setSetting(key, value) {
   const sheet = getSheet(SHEETS.SETTINGS);
   const settings = sheet.getDataRange().getValues();
-  
+
   for (let i = 1; i < settings.length; i++) {
     if (settings[i][0] === key) {
       sheet.getRange(i + 1, 2).setValue(value);
       return;
     }
   }
-  
+
   // Add new setting
   sheet.appendRow([key, value]);
 }
 
 function getNextMeeting() {
-  const dateStr = getSetting('nextMeetingDate');
+  const dateStr = getCachedSettingValue('nextMeetingDate');
   return {
     success: true,
     date: dateStr
@@ -1108,7 +1298,7 @@ function getNextMeeting() {
 }
 
 function getCalendarUrl(user) {
-  const url = getSetting('calendarUrl');
+  const url = getCachedSettingValue('calendarUrl');
   return {
     success: true,
     calendarUrl: url,
@@ -1118,25 +1308,28 @@ function getCalendarUrl(user) {
 
 function getCalendarSettings(user) {
   requireAdmin(user);
-  
+
   return {
     success: true,
-    calendarUrl: getSetting('calendarUrl'),
-    nextMeetingDate: getSetting('nextMeetingDate')
+    calendarUrl: getCachedSettingValue('calendarUrl'),
+    nextMeetingDate: getCachedSettingValue('nextMeetingDate')
   };
 }
 
 function saveCalendarSettings(data, user) {
   requireAdmin(user);
-  
-  if (data.calendarUrl) {
-    setSetting('calendarUrl', data.calendarUrl);
+
+  if (Object.prototype.hasOwnProperty.call(data, 'calendarUrl')) {
+    setSetting('calendarUrl', data.calendarUrl || '');
   }
-  
-  if (data.nextMeetingDate) {
-    setSetting('nextMeetingDate', data.nextMeetingDate);
+
+  if (Object.prototype.hasOwnProperty.call(data, 'nextMeetingDate')) {
+    setSetting('nextMeetingDate', data.nextMeetingDate || '');
   }
-  
+  clearSettingCache('calendarUrl');
+  clearSettingCache('nextMeetingDate');
+  clearReadCaches();
+
   return { success: true, message: 'Settings saved' };
 }
 
@@ -1145,6 +1338,12 @@ function saveCalendarSettings(data, user) {
 // ============================================
 
 function getSheet(sheetName) {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  return ss.getSheetByName(sheetName);
+  return getSpreadsheet().getSheetByName(sheetName);
+}
+
+function getSpreadsheet() {
+  if (!SPREADSHEET) {
+    SPREADSHEET = SpreadsheetApp.openById(SPREADSHEET_ID);
+  }
+  return SPREADSHEET;
 }

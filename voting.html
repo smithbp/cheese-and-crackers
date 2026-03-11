@@ -100,34 +100,70 @@
             }
         }
 
+        function escapeHtml(value) {
+            const text = String(value || '');
+            return text
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/\"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function sanitizeUrl(value) {
+            if (!value) return '';
+            try {
+                const parsed = new URL(value);
+                if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+                    return parsed.href;
+                }
+            } catch (error) {
+                return '';
+            }
+            return '';
+        }
+
+        function renderStatusMessage(text, typeClass) {
+            const statusDiv = document.getElementById('votingStatus');
+            const p = document.createElement('p');
+            p.className = typeClass;
+            p.textContent = text;
+            statusDiv.textContent = '';
+            statusDiv.appendChild(p);
+        }
+
         async function loadVotingStatus() {
             try {
                 const response = await apiCall('/getVotingStatus');
-                const statusDiv = document.getElementById('votingStatus');
                 
                 if (response.success) {
                     votingSession = response.session;
                     
                     if (!votingSession) {
                         // No active voting
-                        statusDiv.innerHTML = '<p class="no-data">No active voting session. Waiting for admin to start voting.</p>';
+                        renderStatusMessage('No active voting session. Waiting for admin to start voting.', 'no-data');
                         document.getElementById('noVotingState').style.display = 'block';
                         document.getElementById('activeVotingState').style.display = 'none';
                         document.getElementById('resultsState').style.display = 'none';
                     } else if (votingSession.status === 'voting') {
+                        const round = Number(votingSession.currentRound) || 1;
+                        const votesAllowed = Number(votingSession.votesPerUser) || 1;
+
                         // Active voting
-                        statusDiv.innerHTML = `<p class="info">Round ${votingSession.currentRound} - Select up to ${votingSession.votesPerUser} books</p>`;
+                        renderStatusMessage(`Round ${round} - Select up to ${votesAllowed} books`, 'info');
                         document.getElementById('noVotingState').style.display = 'none';
                         document.getElementById('activeVotingState').style.display = 'block';
                         document.getElementById('resultsState').style.display = 'none';
-                        document.getElementById('currentRound').textContent = votingSession.currentRound;
-                        document.getElementById('votesAllowed').textContent = votingSession.votesPerUser;
+                        document.getElementById('currentRound').textContent = String(round);
+                        document.getElementById('votesAllowed').textContent = String(votesAllowed);
                         
-                        maxVotes = votingSession.votesPerUser;
+                        maxVotes = votesAllowed;
                         loadVotingBooks();
                     } else if (votingSession.status === 'results') {
+                        const round = Number(votingSession.currentRound) || 1;
+
                         // Showing results
-                        statusDiv.innerHTML = `<p class="info">Round ${votingSession.currentRound} Results</p>`;
+                        renderStatusMessage(`Round ${round} Results`, 'info');
                         document.getElementById('noVotingState').style.display = 'none';
                         document.getElementById('activeVotingState').style.display = 'none';
                         document.getElementById('resultsState').style.display = 'block';
@@ -151,24 +187,40 @@
                     const userVotes = response.userVotes || [];
                     selectedBooks = new Set(userVotes);
                     
-                    grid.innerHTML = response.books.map(book => `
+                    grid.innerHTML = response.books.map(book => {
+                        const encodedBookId = encodeURIComponent(String(book.id || ''));
+                        const safeTitle = escapeHtml(book.title);
+                        const safeAuthor = escapeHtml(book.author);
+                        const safeNominatedBy = escapeHtml(book.nominatedBy);
+                        const safeImageUrl = sanitizeUrl(book.imageUrl);
+                        const safeAmazonLink = sanitizeUrl(book.amazonLink);
+                        const safeGoodreadsLink = sanitizeUrl(book.goodreadsLink);
+
+                        return `
                         <div class="voting-book-card ${userVotes.includes(book.id) ? 'selected' : ''}" 
-                             onclick="toggleBookSelection('${book.id}')">
+                             data-book-id="${encodedBookId}">
                             <div class="book-card-image">
-                                ${book.imageUrl ? `<img src="${book.imageUrl}" alt="${book.title}">` : '<div class="no-image">📚</div>'}
+                                ${safeImageUrl ? `<img src="${safeImageUrl}" alt="${safeTitle}">` : '<div class="no-image">📚</div>'}
                             </div>
                             <div class="book-card-content">
-                                <h3>${book.title}</h3>
-                                <p class="author">by ${book.author}</p>
-                                <p class="nominated-by">Nominated by: ${book.nominatedBy}</p>
+                                <h3>${safeTitle}</h3>
+                                <p class="author">by ${safeAuthor}</p>
+                                <p class="nominated-by">Nominated by: ${safeNominatedBy}</p>
                                 <div class="book-links">
-                                    ${book.amazonLink ? `<a href="${book.amazonLink}" target="_blank" onclick="event.stopPropagation()" class="btn btn-secondary btn-small">Amazon</a>` : ''}
-                                    ${book.goodreadsLink ? `<a href="${book.goodreadsLink}" target="_blank" onclick="event.stopPropagation()" class="btn btn-secondary btn-small">Goodreads</a>` : ''}
+                                    ${safeAmazonLink ? `<a href="${safeAmazonLink}" target="_blank" onclick="event.stopPropagation()" class="btn btn-secondary btn-small">Amazon</a>` : ''}
+                                    ${safeGoodreadsLink ? `<a href="${safeGoodreadsLink}" target="_blank" onclick="event.stopPropagation()" class="btn btn-secondary btn-small">Goodreads</a>` : ''}
                                 </div>
                             </div>
                             <div class="selection-indicator">✓</div>
                         </div>
-                    `).join('');
+                    `;
+                    }).join('');
+
+                    grid.querySelectorAll('.voting-book-card').forEach(card => {
+                        card.addEventListener('click', () => {
+                            toggleBookSelection(card, card.dataset.bookId || '');
+                        });
+                    });
                     
                     grid.style.display = 'grid';
                     document.getElementById('submitVoteSection').style.display = 'block';
@@ -182,7 +234,14 @@
             }
         }
 
-        function toggleBookSelection(bookId) {
+        function toggleBookSelection(card, encodedBookId) {
+            let bookId = '';
+            try {
+                bookId = decodeURIComponent(encodedBookId);
+            } catch (error) {
+                return;
+            }
+
             if (selectedBooks.has(bookId)) {
                 selectedBooks.delete(bookId);
             } else {
@@ -195,7 +254,6 @@
             }
             
             // Update UI
-            const card = event.currentTarget;
             card.classList.toggle('selected');
             updateVoteCount();
         }
@@ -282,27 +340,36 @@
                     const user = JSON.parse(localStorage.getItem('bookClubUser'));
                     const isAdmin = user && user.isAdmin;
                     
-                    resultsGrid.innerHTML = response.results.map(book => `
+                    resultsGrid.innerHTML = response.results.map(book => {
+                        const safeBookId = escapeHtml(book.id);
+                        const safeTitle = escapeHtml(book.title);
+                        const safeAuthor = escapeHtml(book.author);
+                        const safeNominatedBy = escapeHtml(book.nominatedBy);
+                        const safeImageUrl = sanitizeUrl(book.imageUrl);
+                        const safeVotes = Number(book.votes) || 0;
+
+                        return `
                         <div class="result-card">
                             ${isAdmin ? `
                                 <label class="select-for-next-round">
-                                    <input type="checkbox" value="${book.id}" class="next-round-checkbox">
+                                    <input type="checkbox" value="${safeBookId}" class="next-round-checkbox">
                                     Advance
                                 </label>
                             ` : ''}
                             <div class="book-card-image">
-                                ${book.imageUrl ? `<img src="${book.imageUrl}" alt="${book.title}">` : '<div class="no-image">📚</div>'}
+                                ${safeImageUrl ? `<img src="${safeImageUrl}" alt="${safeTitle}">` : '<div class="no-image">📚</div>'}
                             </div>
                             <div class="book-card-content">
-                                <h3>${book.title}</h3>
-                                <p class="author">by ${book.author}</p>
-                                <p class="nominated-by">Nominated by: ${book.nominatedBy}</p>
+                                <h3>${safeTitle}</h3>
+                                <p class="author">by ${safeAuthor}</p>
+                                <p class="nominated-by">Nominated by: ${safeNominatedBy}</p>
                                 <div class="vote-count-display">
-                                    <strong>${book.votes} votes</strong>
+                                    <strong>${safeVotes} votes</strong>
                                 </div>
                             </div>
                         </div>
-                    `).join('');
+                    `;
+                    }).join('');
                 }
             } catch (error) {
                 console.error('Error loading results:', error);

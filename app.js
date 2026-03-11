@@ -3,45 +3,236 @@ const CONFIG = {
     apiUrl: 'https://script.google.com/macros/s/AKfycbzAD1gIziHG8LxnHH6q6XwHG48utxE7UPIa0WuiTgqW0IAMG8E_GTMgCmrsoejZhD3L/exec'
 };
 
+const API_CACHE_PREFIX = 'bookClubApiCache:';
+const AUTH_VERIFICATION_KEY = 'bookClubAuthVerification';
+const AUTH_VERIFICATION_TTL_MS = 2 * 60 * 1000;
+
+const API_CACHEABLE_ACTIONS = {
+    verifyToken: 60 * 1000,
+    getCurrentBook: 2 * 60 * 1000,
+    getNextMeeting: 5 * 60 * 1000,
+    getMembers: 2 * 60 * 1000,
+    getBooksRead: 2 * 60 * 1000,
+    getNominations: 60 * 1000,
+    getVotingStatus: 20 * 1000,
+    getVotingBooks: 20 * 1000,
+    getVotingResults: 20 * 1000,
+    getCalendarUrl: 5 * 60 * 1000,
+    getCalendarSettings: 5 * 60 * 1000
+};
+
+const MUTATING_ACTIONS = new Set([
+    'addMember',
+    'removeMember',
+    'resetCredentials',
+    'addRating',
+    'addNomination',
+    'removeNomination',
+    'uploadImage',
+    'startVoting',
+    'submitVotes',
+    'showResults',
+    'nextRound',
+    'selectFinalBook',
+    'restartVoting',
+    'saveCalendarSettings'
+]);
+
+function getStoredUser() {
+    try {
+        return JSON.parse(localStorage.getItem('bookClubUser'));
+    } catch (error) {
+        localStorage.removeItem('bookClubUser');
+        return null;
+    }
+}
+
+function setStoredUser(user) {
+    localStorage.setItem('bookClubUser', JSON.stringify(user));
+}
+
+function getActionFromEndpoint(endpoint) {
+    return endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
+}
+
+function isLoginPagePath(pathname = window.location.pathname) {
+    return pathname.includes('login.html');
+}
+
+function buildApiCacheKey(action, data, token) {
+    const safeData = data || {};
+    return `${API_CACHE_PREFIX}${action}:${token || 'anon'}:${JSON.stringify(safeData)}`;
+}
+
+function getCachedApiResponse(key, ttlMs) {
+    try {
+        const cached = sessionStorage.getItem(key);
+        if (!cached) return null;
+
+        const parsed = JSON.parse(cached);
+        if (!parsed || typeof parsed.ts !== 'number') {
+            sessionStorage.removeItem(key);
+            return null;
+        }
+
+        if (Date.now() - parsed.ts > ttlMs) {
+            sessionStorage.removeItem(key);
+            return null;
+        }
+
+        return parsed.value;
+    } catch (error) {
+        return null;
+    }
+}
+
+function setCachedApiResponse(key, value) {
+    try {
+        sessionStorage.setItem(key, JSON.stringify({ ts: Date.now(), value: value }));
+    } catch (error) {
+        // Ignore storage quota errors
+    }
+}
+
+function clearApiCache() {
+    try {
+        for (let i = sessionStorage.length - 1; i >= 0; i--) {
+            const key = sessionStorage.key(i);
+            if (key && key.startsWith(API_CACHE_PREFIX)) {
+                sessionStorage.removeItem(key);
+            }
+        }
+    } catch (error) {
+        // Ignore session storage access errors
+    }
+}
+
+function setAuthVerification(token) {
+    try {
+        sessionStorage.setItem(AUTH_VERIFICATION_KEY, JSON.stringify({
+            token: token,
+            ts: Date.now()
+        }));
+    } catch (error) {
+        // Ignore storage errors
+    }
+}
+
+function clearAuthVerification() {
+    try {
+        sessionStorage.removeItem(AUTH_VERIFICATION_KEY);
+    } catch (error) {
+        // Ignore storage errors
+    }
+}
+
+function hasFreshAuthVerification(token) {
+    try {
+        const raw = sessionStorage.getItem(AUTH_VERIFICATION_KEY);
+        if (!raw) return false;
+        const parsed = JSON.parse(raw);
+
+        if (!parsed || parsed.token !== token || typeof parsed.ts !== 'number') {
+            return false;
+        }
+
+        return Date.now() - parsed.ts <= AUTH_VERIFICATION_TTL_MS;
+    } catch (error) {
+        return false;
+    }
+}
+
+function handleAuthFailure() {
+    localStorage.removeItem('bookClubUser');
+    clearApiCache();
+    clearAuthVerification();
+
+    if (!isLoginPagePath()) {
+        window.location.href = 'login.html';
+    }
+}
+
+function renderUserInfo(user) {
+    const userInfo = document.getElementById('userInfo');
+    if (!userInfo || !user) return;
+
+    userInfo.textContent = '';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'welcome-label';
+    nameSpan.textContent = user.name || 'Member';
+
+    const logoutLink = document.createElement('a');
+    logoutLink.href = '#';
+    logoutLink.textContent = 'Logout';
+    logoutLink.addEventListener('click', function(event) {
+        event.preventDefault();
+        logout();
+    });
+
+    userInfo.appendChild(nameSpan);
+    userInfo.appendChild(logoutLink);
+}
+
 // API call helper function
-async function apiCall(endpoint, data = null) {
-    const currentUser = JSON.parse(localStorage.getItem('bookClubUser'));
+async function apiCall(endpoint, data = null, options = {}) {
+    const currentUser = getStoredUser();
     const token = currentUser ? currentUser.token : null;
-    
-    const url = CONFIG.apiUrl;
-    
-    // Remove leading slash from endpoint if present to match backend action names
-    const action = endpoint.startsWith('/') ? endpoint.substring(1) : endpoint;
-    
-    const options = {
+    const action = getActionFromEndpoint(endpoint);
+    const payload = {
+        action: action,
+        ...(data || {}),
+        token: token
+    };
+
+    const cacheTtlMs = options.cacheTtlMs ?? API_CACHEABLE_ACTIONS[action] ?? 0;
+    const useCache = cacheTtlMs > 0 && !options.bypassCache;
+    const cacheKey = useCache ? buildApiCacheKey(action, data, token) : null;
+
+    if (useCache && cacheKey) {
+        const cachedResult = getCachedApiResponse(cacheKey, cacheTtlMs);
+        if (cachedResult) {
+            return cachedResult;
+        }
+    }
+
+    const fetchOptions = {
         method: 'POST',
         headers: {
-            'Content-Type': 'text/plain'  // Use text/plain to avoid CORS preflight
+            'Content-Type': 'text/plain' // Use text/plain to avoid CORS preflight
         },
-        body: JSON.stringify({
-            action: action,
-            ...data,
-            token: token
-        })
+        body: JSON.stringify(payload)
     };
-    
+
     try {
-        const response = await fetch(url, options);
-        
+        const response = await fetch(CONFIG.apiUrl, fetchOptions);
+
         if (!response.ok) {
             throw new Error('Network response was not ok');
         }
-        
+
         const result = await response.json();
-        
-        // Handle authentication errors
+
         if (result.error === 'UNAUTHORIZED' || result.error === 'INVALID_TOKEN') {
-            localStorage.removeItem('bookClubUser');
-            if (window.location.pathname !== '/login.html') {
-                window.location.href = 'login.html';
-            }
+            handleAuthFailure();
+            return result;
         }
-        
+
+        if (action === 'verifyToken' && result.success && result.user) {
+            setStoredUser(result.user);
+            setAuthVerification(result.user.token);
+            renderUserInfo(result.user);
+        }
+
+        if (useCache && cacheKey && result.success) {
+            setCachedApiResponse(cacheKey, result);
+        }
+
+        if (MUTATING_ACTIONS.has(action) && result.success) {
+            clearApiCache();
+            clearAuthVerification();
+        }
+
         return result;
     } catch (error) {
         console.error('API call error:', error);
@@ -51,49 +242,39 @@ async function apiCall(endpoint, data = null) {
 
 // Initialize authentication
 async function initAuth() {
-    const currentUser = JSON.parse(localStorage.getItem('bookClubUser'));
-    const userInfo = document.getElementById('userInfo');
-    
-    // Check if we're on the login page
-    const isLoginPage = window.location.pathname.includes('login.html');
-    
+    const currentUser = getStoredUser();
+    const isLoginPage = isLoginPagePath();
+
     if (!currentUser || !currentUser.token) {
         if (!isLoginPage) {
-            // Redirect to login if not authenticated
             window.location.href = 'login.html';
-            return;
+            return false;
         }
-    } else {
-        // Verify token is still valid
-        try {
-            const response = await apiCall('/verifyToken');
-            
-            if (!response.success) {
-                localStorage.removeItem('bookClubUser');
-                if (!isLoginPage) {
-                    window.location.href = 'login.html';
-                }
-                return;
-            }
-            
-            // Update user info in the navbar and normalize stored user
-            if (response.user) {
-                const verifiedUser = response.user;
-                localStorage.setItem('bookClubUser', JSON.stringify(verifiedUser));
-                if (userInfo) {
-                    userInfo.innerHTML = `
-                        <span>Welcome, ${verifiedUser.name}!</span>
-                        <a href="#" onclick="logout()">Logout</a>
-                    `;
-                }
-            }
-        } catch (error) {
-            console.error('Token verification failed:', error);
-            localStorage.removeItem('bookClubUser');
-            if (!isLoginPage) {
-                window.location.href = 'login.html';
-            }
+        return true;
+    }
+
+    renderUserInfo(currentUser);
+
+    if (isLoginPage) {
+        window.location.href = 'index.html';
+        return true;
+    }
+
+    try {
+        const response = await apiCall('/verifyToken', null, {
+            bypassCache: true
+        });
+
+        if (!response.success || !response.user) {
+            handleAuthFailure();
+            return false;
         }
+
+        return true;
+    } catch (error) {
+        console.error('Token verification failed:', error);
+        handleAuthFailure();
+        return false;
     }
 }
 
@@ -101,6 +282,8 @@ async function initAuth() {
 function logout() {
     if (confirm('Are you sure you want to logout?')) {
         localStorage.removeItem('bookClubUser');
+        clearApiCache();
+        clearAuthVerification();
         window.location.href = 'login.html';
     }
 }
@@ -127,7 +310,7 @@ function generateRandomString(length) {
 
 // Check if user is admin
 function isAdmin() {
-    const user = JSON.parse(localStorage.getItem('bookClubUser'));
+    const user = getStoredUser();
     return user && user.isAdmin === true;
 }
 
@@ -139,6 +322,19 @@ function showAdminOnly(elementId) {
             element.style.display = 'block';
         }
     }
+}
+
+function applyPageContext() {
+    const currentFile = (window.location.pathname.split('/').pop() || 'index.html').toLowerCase();
+    const pageName = currentFile.replace('.html', '') || 'index';
+    document.body.classList.add('page-shell', `page-${pageName}`);
+
+    document.querySelectorAll('.dropdown-content a').forEach(link => {
+        const target = (link.getAttribute('href') || '').toLowerCase();
+        if (target === currentFile) {
+            link.classList.add('active');
+        }
+    });
 }
 
 // Global error handler for uncaught errors
@@ -170,17 +366,17 @@ function showToast(message, type = 'info', timeout = 3500) {
     }, timeout);
 }
 
-// Handle API URL configuration warning
+// Handle API URL configuration warning and page context
 window.addEventListener('DOMContentLoaded', function() {
+    applyPageContext();
+
     if (CONFIG.apiUrl === 'YOUR_GOOGLE_APPS_SCRIPT_WEB_APP_URL_HERE') {
         console.warn('⚠️ API URL not configured! Please update the CONFIG.apiUrl in app.js with your Google Apps Script Web App URL.');
-        
-        // Show a warning banner if not on login page
-        const isLoginPage = window.location.pathname.includes('login.html');
-        if (!isLoginPage) {
+
+        if (!isLoginPagePath()) {
             const banner = document.createElement('div');
-            banner.style.cssText = 'background: #ff9800; color: white; padding: 15px; text-align: center; font-weight: bold;';
-            banner.textContent = '⚠️ API not configured. Please set up your Google Apps Script Web App URL in app.js';
+            banner.style.cssText = 'background: #a16108; color: white; padding: 15px; text-align: center; font-weight: 700;';
+            banner.textContent = '⚠️ API not configured. Please set your Google Apps Script Web App URL in app.js';
             document.body.insertBefore(banner, document.body.firstChild);
         }
     }
