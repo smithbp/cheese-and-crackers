@@ -1,6 +1,6 @@
 // Global configuration
 const CONFIG = {
-    apiUrl: 'https://script.google.com/macros/s/AKfycbzAD1gIziHG8LxnHH6q6XwHG48utxE7UPIa0WuiTgqW0IAMG8E_GTMgCmrsoejZhD3L/exec'
+    apiUrl: 'https://script.google.com/macros/s/AKfycbzV6jEmE4EEQ10pHxLSwpOqcqCdBPWMP3p5UafDufKw-ovxC4agLwHtS05vgRO8OS9u/exec'
 };
 
 const API_CACHE_PREFIX = 'bookClubApiCache:';
